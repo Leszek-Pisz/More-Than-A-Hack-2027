@@ -218,3 +218,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Match data is gated and not redistributable
+data/*
+!data/.gitkeep
+
+# Our submissions are full-match label files: keep them out of the public repo.
+# The organisers' baselines are the exception (computed from tracking only).
+evaluation/results/*.csv
+!evaluation/results/baseline_*.csv
+evaluation/reports/
+evaluation/scoreboard.csv
+
+# macOS
+.DS_Store
