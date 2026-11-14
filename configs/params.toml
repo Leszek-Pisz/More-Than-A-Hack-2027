@@ -1,5 +1,5 @@
-# All the numbers in one place. Started as hand-picked guesses (football knowledge), then tuned on
-# the Metrica games with src/tune.py (14.11). Never on this match / its GT.
+# All the numbers in one place. Started as hand-picked guesses (football knowledge), then tuned with src/tune.py
+# on Metrica (3 games) + IDSSE Bundesliga (7 games), each league weighted the same (14.11). Never on this match / its GT.
 
 [submission]
 name = "m0_baseline"          # file goes to evaluation/results/<name>.csv
@@ -9,48 +9,48 @@ max_speed = 40.0              # m/s, even the hardest shots are ~35, so faster =
 out_margin = 0.5              # m past the line before we call it out
 
 [tempo]
-window_s = 2.493
+window_s = 4.365
 # avg player speed (mean, sd) in m/s. ~10.5 km per player over ~95 min is ~1.9 m/s overall,
 # and when play stops people basically walk (~1-1.4 m/s)
-alive_mean = 1.807
-alive_sd = 0.848
-dead_mean = 0.977
-dead_sd = 0.583
+alive_mean = 2.324
+alive_sd = 1.097
+dead_mean = 1.383
+dead_sd = 0.752
 
 [evidence]
-control_radius = 1.159          # m
-p_nearest_is_owner = 0.623
-p_missing_alive = 0.16        # ball not tracked while in play
-p_missing_dead = 0.81         # ball not tracked while dead
+control_radius = 1.599          # m
+p_nearest_is_owner = 0.755
+p_missing_alive = 0.496        # ball not tracked while in play
+p_missing_dead = 0.562         # ball not tracked while dead
 p_out_alive = 0.01
-p_out_dead = 0.14
+p_out_dead = 0.226
 
 [hmm]
 # rough football averages: a possession ~10 s, a stoppage ~15 s,
 # half of possessions end with a turnover, half with the ball going dead
-possession_mean_s = 22.098
-dead_mean_s = 21.348
-p_turnover = 0.625
+possession_mean_s = 24.165
+dead_mean_s = 39.31
+p_turnover = 0.5
 
 [events]
-# module 4, tuned on Metrica (src/tune.py, 14.11)
+# module 4, tuned together with the rest (see top)
 enabled = true
 use_still = true
-still_speed = 0.7             # m/s, ball "not moving"
-still_s = 1.497                 # ...for at least this long
+still_speed = 0.732             # m/s, ball "not moving"
+still_s = 1.453                 # ...for at least this long
 p_still_dead = 0.5            # how often the ball stands still in a stoppage vs in play
-p_still_alive = 0.159
+p_still_alive = 0.035
 use_spots = true              # standing still on a corner / touchline / goal area / centre spot
 p_spot_dead = 0.6
-p_spot_alive = 0.165
+p_spot_alive = 0.497
 use_gap_after_line = true     # ball vanished right at / past a line
-line_margin = 0.838             # m
+line_margin = 2.698             # m
 p_gapline_dead = 0.7
-p_gapline_alive = 0.154
+p_gapline_alive = 0.575
 use_control = true            # a player stays by the ball, no opponent near
-control_radius = 1.544          # m
-control_s = 0.194
-p_control_is_owner = 0.616
+control_radius = 1.288          # m
+control_s = 0.543
+p_control_is_owner = 0.619
 
 [decoder]
 # module 7. "hmm" = plain Viterbi from baseline.py, "hsmm" = decode.py with length priors
