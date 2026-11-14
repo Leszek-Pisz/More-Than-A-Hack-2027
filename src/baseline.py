@@ -137,19 +137,24 @@ def viterbi(loglik, log_trans, start=D):
     return path
 
 
-def predict(p):
-    table = pd.read_parquet(PROCESSED / "tactical_tracking.parquet")
-    tracks = pd.read_parquet(PROCESSED / "tactical_tracks.parquet")
+def label_match(table, tracks, p, n_frames):
+    # works on any match in our table format (ours or the external ones), returns codes 0/1/2
     slots_h = tracks.loc[tracks["team"] == "H", "slot"].tolist()
     slots_a = tracks.loc[tracks["team"] == "A", "slot"].tolist()
     log_trans = transition_matrix(p)
 
-    codes = np.full(N_FRAMES, D, dtype=np.int8)
+    codes = np.full(n_frames, D, dtype=np.int8)
     for half in (1, 2):
         rows = table.index[table["half"].eq(half).fillna(False).to_numpy(bool)]
         part = table.loc[rows].reset_index(drop=True)
         codes[part["frame"].to_numpy()] = viterbi(evidence(part, slots_h, slots_a, p), log_trans)
-    return LABELS[codes]
+    return codes
+
+
+def predict(p):
+    table = pd.read_parquet(PROCESSED / "tactical_tracking.parquet")
+    tracks = pd.read_parquet(PROCESSED / "tactical_tracks.parquet")
+    return LABELS[label_match(table, tracks, p, N_FRAMES)]
 
 
 def main():
@@ -158,7 +163,7 @@ def main():
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{p['submission']['name']}.csv"
     pd.DataFrame({"frame": np.arange(N_FRAMES), "label": labels}).to_csv(out, index=False)
-    print(f"zapisano {out.relative_to(ROOT)}")
+    print(f"saved {out.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

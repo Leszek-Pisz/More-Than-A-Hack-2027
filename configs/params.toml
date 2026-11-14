@@ -2,7 +2,7 @@
 # later we tune them on the external games (module 1). Never on this match / its GT.
 
 [submission]
-name = "m0_typowa"            # file goes to evaluation/results/<name>.csv
+name = "m0_baseline"          # file goes to evaluation/results/<name>.csv
 
 [ball]
 max_speed = 40.0              # m/s, even the hardest shots are ~35, so faster = tracking glitch
