@@ -217,7 +217,7 @@ def add_noise(table, slots, rng, labels=None):
         "dead_bias": rng.uniform(0.0, 0.7),         # gaps like stoppages more
         "box_bias": rng.uniform(1.0, 3.0),          # ...and the area near goals
         "jumps_per_min": rng.uniform(0.5, 3.0),     # one-frame fake ball positions
-        "ball_sd": rng.uniform(0.1, 0.8),           # m
+        "ball_sd": rng.uniform(0.05, 0.5),          # m, smooth drift (see _wobble)
         "player_sd": rng.uniform(0.05, 0.4),        # m
         "player_missing": rng.uniform(0.02, 0.15),
         "player_gap_s": rng.uniform(1, 10),
@@ -225,8 +225,8 @@ def add_noise(table, slots, rng, labels=None):
     }
 
     bx, by = t["ball_x"].to_numpy().copy(), t["ball_y"].to_numpy().copy()
-    bx += _wobble(rng, n, knobs["ball_sd"], 0.4)
-    by += _wobble(rng, n, knobs["ball_sd"], 0.4)
+    bx += _wobble(rng, n, knobs["ball_sd"], 2.0)
+    by += _wobble(rng, n, knobs["ball_sd"], 2.0)
 
     # where a gap likes to start
     weight = np.ones(n)

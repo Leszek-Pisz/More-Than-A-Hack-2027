@@ -17,6 +17,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import events
+
 ROOT = Path(__file__).resolve().parents[1]
 PROCESSED = ROOT / "data" / "processed"
 RESULTS = ROOT / "evaluation" / "results"
@@ -54,7 +56,7 @@ def gauss_logpdf(x, mean, sd):
     return -0.5 * ((x - mean) / sd) ** 2 - np.log(sd)
 
 
-def evidence(table, slots_h, slots_a, p):
+def evidence(table, slots_h, slots_a, p, pitch=(PITCH_LENGTH, PITCH_WIDTH)):
     # log-likelihood of what we see in each frame, for H / A / D -> (n, 3)
     n = len(table)
     loglik = np.zeros((n, 3))
@@ -78,7 +80,7 @@ def evidence(table, slots_h, slots_a, p):
                         p["ball"]["max_speed"])
     missing = np.isnan(bx)
     m = p["ball"]["out_margin"]
-    out = ~missing & ((bx < -m) | (bx > PITCH_LENGTH + m) | (by < -m) | (by > PITCH_WIDTH + m))
+    out = ~missing & ((bx < -m) | (bx > pitch[0] + m) | (by < -m) | (by > pitch[1] + m))
     on_pitch = ~missing & ~out
     p_in_alive = 1 - e["p_missing_alive"] - e["p_out_alive"]
     p_in_dead = 1 - e["p_missing_dead"] - e["p_out_dead"]
@@ -105,6 +107,9 @@ def evidence(table, slots_h, slots_a, p):
         loglik[mask, team] += np.log(q)
         loglik[mask, other] += np.log(1 - q)
         loglik[mask, D] += np.log(0.5)
+
+    if p.get("events", {}).get("enabled"):
+        loglik += events.extra_evidence(bx, by, dist_h, dist_a, p, pitch)
     return loglik
 
 
@@ -137,7 +142,7 @@ def viterbi(loglik, log_trans, start=D):
     return path
 
 
-def label_match(table, tracks, p, n_frames):
+def label_match(table, tracks, p, n_frames, pitch=(PITCH_LENGTH, PITCH_WIDTH)):
     # works on any match in our table format (ours or the external ones), returns codes 0/1/2
     slots_h = tracks.loc[tracks["team"] == "H", "slot"].tolist()
     slots_a = tracks.loc[tracks["team"] == "A", "slot"].tolist()
@@ -147,7 +152,7 @@ def label_match(table, tracks, p, n_frames):
     for half in (1, 2):
         rows = table.index[table["half"].eq(half).fillna(False).to_numpy(bool)]
         part = table.loc[rows].reset_index(drop=True)
-        codes[part["frame"].to_numpy()] = viterbi(evidence(part, slots_h, slots_a, p), log_trans)
+        codes[part["frame"].to_numpy()] = viterbi(evidence(part, slots_h, slots_a, p, pitch), log_trans)
     return codes
 
 

@@ -60,7 +60,7 @@ def run(p, seeds=3, verbose=True):
         for seed in range(seeds):
             rng = np.random.default_rng(seed)
             noisy, _ = external.add_noise(table, tracks["slot"].tolist(), rng, gt)
-            ours = score(gt, baseline.label_match(noisy, tracks, p, len(gt)))
+            ours = score(gt, baseline.label_match(noisy, tracks, p, len(gt), external.PITCH))
             ref = score(gt, smooth50(noisy, tracks, len(gt)))
             rows.append((name, seed, *ours, *ref[:2]))
             if verbose:

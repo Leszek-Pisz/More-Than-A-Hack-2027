@@ -1,5 +1,5 @@
-# All the numbers in one place. For now they're picked by hand from general football knowledge,
-# later we tune them on the external games (module 1). Never on this match / its GT.
+# All the numbers in one place. Started as hand-picked guesses (football knowledge), then tuned on
+# the Metrica games with src/tune.py (14.11). Never on this match / its GT.
 
 [submission]
 name = "m0_baseline"          # file goes to evaluation/results/<name>.csv
@@ -9,25 +9,45 @@ max_speed = 40.0              # m/s, even the hardest shots are ~35, so faster =
 out_margin = 0.5              # m past the line before we call it out
 
 [tempo]
-window_s = 2.0
+window_s = 3.446
 # avg player speed (mean, sd) in m/s. ~10.5 km per player over ~95 min is ~1.9 m/s overall,
 # and when play stops people basically walk (~1-1.4 m/s)
-alive_mean = 2.1
-alive_sd = 0.7
-dead_mean = 1.1
-dead_sd = 0.5
+alive_mean = 2.293
+alive_sd = 0.709
+dead_mean = 1.28
+dead_sd = 0.877
 
 [evidence]
-control_radius = 2.0          # m
-p_nearest_is_owner = 0.75
-p_missing_alive = 0.35        # ball not tracked while in play
-p_missing_dead = 0.65         # ball not tracked while dead
+control_radius = 1.292          # m
+p_nearest_is_owner = 0.642
+p_missing_alive = 0.398        # ball not tracked while in play
+p_missing_dead = 0.812         # ball not tracked while dead
 p_out_alive = 0.01
-p_out_dead = 0.30
+p_out_dead = 0.138
 
 [hmm]
 # rough football averages: a possession ~10 s, a stoppage ~15 s,
 # half of possessions end with a turnover, half with the ball going dead
-possession_mean_s = 10.0
-dead_mean_s = 15.0
-p_turnover = 0.5
+possession_mean_s = 7.797
+dead_mean_s = 5.917
+p_turnover = 0.646
+
+[events]
+# module 4, guesses for now (tuned later on the external games)
+enabled = true
+use_still = true
+still_speed = 1.0             # m/s, ball "not moving"
+still_s = 1.0                 # ...for at least this long
+p_still_dead = 0.5            # how often the ball stands still in a stoppage vs in play
+p_still_alive = 0.05
+use_spots = true              # standing still on a corner / touchline / goal area / centre spot
+p_spot_dead = 0.6
+p_spot_alive = 0.1
+use_gap_after_line = true     # ball vanished right at / past a line
+line_margin = 1.0             # m
+p_gapline_dead = 0.7
+p_gapline_alive = 0.2
+use_control = true            # a player stays by the ball, no opponent near
+control_radius = 1.5          # m
+control_s = 0.4
+p_control_is_owner = 0.9
