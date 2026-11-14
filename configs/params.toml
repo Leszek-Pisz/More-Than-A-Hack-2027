@@ -1,0 +1,33 @@
+# All the numbers in one place. For now they're picked by hand from general football knowledge,
+# later we tune them on the external games (module 1). Never on this match / its GT.
+
+[submission]
+name = "m0_typowa"            # file goes to evaluation/results/<name>.csv
+
+[ball]
+max_speed = 40.0              # m/s, even the hardest shots are ~35, so faster = tracking glitch
+out_margin = 0.5              # m past the line before we call it out
+
+[tempo]
+window_s = 2.0
+# avg player speed (mean, sd) in m/s. ~10.5 km per player over ~95 min is ~1.9 m/s overall,
+# and when play stops people basically walk (~1-1.4 m/s)
+alive_mean = 2.1
+alive_sd = 0.7
+dead_mean = 1.1
+dead_sd = 0.5
+
+[evidence]
+control_radius = 2.0          # m
+p_nearest_is_owner = 0.75
+p_missing_alive = 0.35        # ball not tracked while in play
+p_missing_dead = 0.65         # ball not tracked while dead
+p_out_alive = 0.01
+p_out_dead = 0.30
+
+[hmm]
+# rough football averages: a possession ~10 s, a stoppage ~15 s,
+# half of possessions end with a turnover, half with the ball going dead
+possession_mean_s = 10.0
+dead_mean_s = 15.0
+p_turnover = 0.5
