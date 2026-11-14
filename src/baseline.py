@@ -17,7 +17,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import decode
 import events
+import tags_prior
 
 ROOT = Path(__file__).resolve().parents[1]
 PROCESSED = ROOT / "data" / "processed"
@@ -142,7 +144,8 @@ def viterbi(loglik, log_trans, start=D):
     return path
 
 
-def label_match(table, tracks, p, n_frames, pitch=(PITCH_LENGTH, PITCH_WIDTH)):
+def label_match(table, tracks, p, n_frames, pitch=(PITCH_LENGTH, PITCH_WIDTH), extra=None):
+    # extra: optional (n_frames, 3) log-likelihood added on top (e.g. Smart Tagging hint)
     # works on any match in our table format (ours or the external ones), returns codes 0/1/2
     slots_h = tracks.loc[tracks["team"] == "H", "slot"].tolist()
     slots_a = tracks.loc[tracks["team"] == "A", "slot"].tolist()
@@ -152,14 +155,23 @@ def label_match(table, tracks, p, n_frames, pitch=(PITCH_LENGTH, PITCH_WIDTH)):
     for half in (1, 2):
         rows = table.index[table["half"].eq(half).fillna(False).to_numpy(bool)]
         part = table.loc[rows].reset_index(drop=True)
-        codes[part["frame"].to_numpy()] = viterbi(evidence(part, slots_h, slots_a, p, pitch), log_trans)
+        ll = evidence(part, slots_h, slots_a, p, pitch)
+        if extra is not None:
+            ll = ll + extra[part["frame"].to_numpy()]
+        if p.get("decoder", {}).get("type") == "hsmm":
+            codes[part["frame"].to_numpy()] = decode.hsmm(ll, p)
+        else:
+            codes[part["frame"].to_numpy()] = viterbi(ll, log_trans)
     return codes
 
 
 def predict(p):
     table = pd.read_parquet(PROCESSED / "tactical_tracking.parquet")
     tracks = pd.read_parquet(PROCESSED / "tactical_tracks.parquet")
-    return LABELS[label_match(table, tracks, p, N_FRAMES)]
+    extra = None
+    if p.get("tags", {}).get("enabled"):
+        extra = tags_prior.load(PROCESSED / "tactical_tags.parquet", N_FRAMES, p["tags"]["weight"])
+    return LABELS[label_match(table, tracks, p, N_FRAMES, extra=extra)]
 
 
 def main():

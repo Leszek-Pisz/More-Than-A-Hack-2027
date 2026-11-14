@@ -1,11 +1,13 @@
-"""Tune the m0 numbers on the external games (never on our match).
+"""Tune the numbers on the external games (never on our match).
 
-    uv run python src/tune.py --trials 120
+    uv run python src/tune.py --from-prior --trials 150   # tune on Metrica + IDSSE
+    uv run python src/tune.py --cv --trials 100           # tune on one league, test on the other
+    uv run python src/tune.py --exam                      # score params.toml on SkillCorner
 
-Simple search: start from params.toml, each trial changes ~30% of the numbers of the best set
-so far and keeps it if it scores better. Each trial is scored on 3 Metrica games x 2
-noise seeds (mean spellF1). The best one is then re-checked on different noise seeds (10-12) so
-we don't fool ourselves with lucky noise. Fixed seeds, so it's reproducible.
+Simple search: start from a params file, each trial changes ~30% of the numbers of the best set
+so far and keeps it if it scores better. Score = mean spellF1 per league (Metrica, IDSSE), games
+with our random tracking noise. Re-checked on fresh noise, then the SkillCorner exam (real
+broadcast holes, never tuned on). Fixed seeds, so it's reproducible.
 """
 
 import argparse
@@ -48,11 +50,20 @@ SPACE = [
     ("events", "control_s", 0.1, 1.0, False),
     ("events", "p_control_is_owner", 0.55, 0.97, False),
 ]
+# only used when [decoder] type = "hsmm"
+SPACE_HSMM = [
+    ("decoder", "evidence_scale", 0.1, 1.5, True),
+    ("decoder", "split_penalty", -20.0, -1.0, False),
+]
 
 
-def make_sets(seeds):
+LEAGUES = {"metrica": external.GAMES,
+           "idsse": tuple(f"idsse_{m}" for m in external.IDSSE_GAMES)}
+
+
+def make_sets(seeds, games):
     sets = []
-    for name in external.GAMES:
+    for name in games:
         table, tracks, gt = external.load(name)
         for seed in seeds:
             noisy, _ = external.add_noise(table, tracks["slot"].tolist(),
@@ -70,10 +81,20 @@ def score(p, sets):
     return np.array(out, dtype=float)
 
 
+def objective(p, sets):
+    # each league counts the same, so 7 Bundesliga games don't drown the 3 Metrica ones
+    res = score(p, sets)
+    names = [n for n, *_ in sets]
+    per = [res[[i for i, n in enumerate(names) if n in games], 0].mean()
+           for games in LEAGUES.values() if any(n in games for n in names)]
+    return float(np.mean(per))
+
+
 def sample(best, rng, share=0.3):
     # change ~30% of the numbers of the best set so far, keep the rest
     p = copy.deepcopy(best)
-    for sec, key, lo, hi, log in SPACE:
+    space = SPACE + (SPACE_HSMM if p.get("decoder", {}).get("type") == "hsmm" else [])
+    for sec, key, lo, hi, log in space:
         if rng.random() > share:
             continue
         p[sec][key] = float(np.exp(rng.uniform(np.log(lo), np.log(hi))) if log
@@ -84,36 +105,87 @@ def sample(best, rng, share=0.3):
     return p
 
 
+def search(base, sets, trials, rng, log=True):
+    best_p, best = base, objective(base, sets)
+    if log:
+        print(f"start: spellF1 {best:.4f}", flush=True)
+    for i in range(trials):
+        p = sample(best_p, rng)
+        sc = objective(p, sets)
+        if sc > best:
+            best, best_p = sc, p
+            if log:
+                print(f"trial {i}: spellF1 {sc:.4f}  new best", flush=True)
+    return best_p
+
+
+def report(title, before, after, sets):
+    print(title)
+    names = [n for n, *_ in sets]
+    for league, games in LEAGUES.items():
+        idx = [i for i, n in enumerate(names) if n in games]
+        if not idx:
+            continue
+        o, n = before[idx].mean(0), after[idx].mean(0)
+        print(f"  {league:8s} spellF1 {o[0]:.3f} -> {n[0]:.3f}   macroF1 {o[1]:.3f} -> "
+              f"{n[1]:.3f}   poss/game {o[2]:.0f} -> {n[2]:.0f} (true {o[3]:.0f})", flush=True)
+
+
+def cross_validate(args, base):
+    # tune on one league, test on the other one it never saw
+    for train, test in (("idsse", "metrica"), ("metrica", "idsse")):
+        print(f"\ntune on {train} -> test on {test} (unseen league)", flush=True)
+        best_p = search(base, make_sets([20], LEAGUES[train]), args.trials,
+                        np.random.default_rng(7), log=False)
+        sets = make_sets([10], LEAGUES[test])
+        report(f"  result on {test}:", score(base, sets), score(best_p, sets), sets)
+
+
+def exam(p):
+    # SkillCorner: real broadcast tracking holes, no added noise, never tuned on
+    rows = []
+    for name in external.skillcorner_games():
+        table, tracks, gt = external.load(name)
+        pred = baseline.label_match(table, tracks, p, len(gt), external.PITCH)
+        r = pm.evaluate(gt, pred)
+        rows.append((r["spell_f1_mean"], r["macro_f1"], r["n_pred_spells"], r["n_gt_spells"]))
+    rows = np.array(rows)
+    m = rows.mean(0)
+    print(f"EXAM skillcorner ({len(rows)} games): spellF1 {m[0]:.3f}  macroF1 {m[1]:.3f}  "
+          f"poss/game {m[2]:.0f} (true {m[3]:.0f})", flush=True)
+    return m
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--trials", type=int, default=120)
+    parser.add_argument("--decoder", choices=["hmm", "hsmm"], help="override [decoder] type")
+    parser.add_argument("--cv", action="store_true", help="tune on one league, test on the other")
+    parser.add_argument("--exam", action="store_true", help="only score params.toml on SkillCorner")
+    parser.add_argument("--from-prior", action="store_true",
+                        help="start from params_prior.toml (hand-picked) instead of params.toml")
     args = parser.parse_args()
 
-    base = baseline.load_params()
-    tune_sets = make_sets([0, 1])
-    rng = np.random.default_rng(2027)
+    path = ROOT / "configs" / ("params_prior.toml" if args.from_prior or args.cv else "params.toml")
+    base = baseline.load_params(path)
+    if args.decoder:
+        base["decoder"]["type"] = args.decoder
+    if args.exam:
+        return exam(base)
+    if args.cv:
+        return cross_validate(args, base)
 
-    best_p, best = base, score(base, tune_sets)[:, 0].mean()
-    print(f"start: spellF1 {best:.4f}", flush=True)
-    for i in range(args.trials):
-        p = sample(best_p, rng)
-        s = score(p, tune_sets)[:, 0].mean()
-        if s > best:
-            best, best_p = s, p
-            print(f"trial {i}: spellF1 {s:.4f}  new best", flush=True)
-
-    check = make_sets([10, 11, 12])
-    old, new = score(base, check), score(best_p, check)
-    print("\nre-check on fresh noise (seeds 10-12), per game:")
-    for k, name in enumerate(external.GAMES):
-        o, n = old[k * 3:(k + 1) * 3].mean(0), new[k * 3:(k + 1) * 3].mean(0)
-        print(f"  {name}: spellF1 {o[0]:.3f} -> {n[0]:.3f}   macroF1 {o[1]:.3f} -> {n[1]:.3f}   "
-              f"poss {o[2]:.0f} -> {n[2]:.0f} (true {o[3]:.0f})")
-    print(f"  MEAN: spellF1 {old[:, 0].mean():.3f} -> {new[:, 0].mean():.3f}   "
-          f"macroF1 {old[:, 1].mean():.3f} -> {new[:, 1].mean():.3f}")
+    games = LEAGUES["metrica"] + LEAGUES["idsse"]
+    best_p = search(base, make_sets([0], games), args.trials, np.random.default_rng(2027))
+    check = make_sets([10], games)
+    report("\nre-check on fresh noise (seed 10):", score(base, check), score(best_p, check), check)
+    print("\nexam before / after:")
+    exam(base)
+    exam(best_p)
 
     print("\nbest params:")
-    for sec, key, *_ in SPACE:
+    space = SPACE + (SPACE_HSMM if best_p.get("decoder", {}).get("type") == "hsmm" else [])
+    for sec, key, *_ in space:
         print(f"  [{sec}] {key} = {best_p[sec][key]:.3f}")
 
 

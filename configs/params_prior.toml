@@ -1,0 +1,73 @@
+# The hand-picked starting values (before any tuning). Used as the start point for the
+# cross-validation in tune.py --cv, so it never starts from numbers tuned on all games.
+
+[submission]
+name = "m0_baseline"          # file goes to evaluation/results/<name>.csv
+
+[ball]
+max_speed = 40.0              # m/s, even the hardest shots are ~35, so faster = tracking glitch
+out_margin = 0.5              # m past the line before we call it out
+
+[tempo]
+window_s = 2.0
+# avg player speed (mean, sd) in m/s. ~10.5 km per player over ~95 min is ~1.9 m/s overall,
+# and when play stops people basically walk (~1-1.4 m/s)
+alive_mean = 2.1
+alive_sd = 0.7
+dead_mean = 1.1
+dead_sd = 0.5
+
+[evidence]
+control_radius = 2.0          # m
+p_nearest_is_owner = 0.75
+p_missing_alive = 0.35        # ball not tracked while in play
+p_missing_dead = 0.65         # ball not tracked while dead
+p_out_alive = 0.01
+p_out_dead = 0.30
+
+[hmm]
+# rough football averages: a possession ~10 s, a stoppage ~15 s,
+# half of possessions end with a turnover, half with the ball going dead
+possession_mean_s = 10.0
+dead_mean_s = 15.0
+p_turnover = 0.5
+
+[events]
+# module 4, guesses for now (tuned later on the external games)
+enabled = true
+use_still = true
+still_speed = 1.0             # m/s, ball "not moving"
+still_s = 1.0                 # ...for at least this long
+p_still_dead = 0.5            # how often the ball stands still in a stoppage vs in play
+p_still_alive = 0.05
+use_spots = true              # standing still on a corner / touchline / goal area / centre spot
+p_spot_dead = 0.6
+p_spot_alive = 0.1
+use_gap_after_line = true     # ball vanished right at / past a line
+line_margin = 1.0             # m
+p_gapline_dead = 0.7
+p_gapline_alive = 0.2
+use_control = true            # a player stays by the ball, no opponent near
+control_radius = 1.5          # m
+control_s = 0.4
+p_control_is_owner = 0.9
+
+[decoder]
+# module 7. "hmm" = plain Viterbi from baseline.py, "hsmm" = decode.py with length priors
+type = "hmm"
+block = 5                     # frames per block (0.2 s)
+max_s = 90.0                  # longest single segment, longer ones get split (no effect on labels)
+evidence_scale = 0.2          # frames next to each other aren't independent, so don't trust the sum
+split_penalty = -10.0
+# log-normal length of segments, in seconds, fitted on the 3 Metrica games:
+# possessions median ~4.8 s (10-90%: 0.8-25 s), stoppages median ~15.6 s (4-50 s)
+poss_mu = 1.482
+poss_sigma = 1.442
+dead_mu = 2.657
+dead_sigma = 1.175
+
+[tags]
+# Smart Tagging hint (tags_prior.py). Can't be tuned (no tags in the external games), so it's a
+# fixed small guess and off until we decide otherwise.
+enabled = false
+weight = 0.05                 # per frame, log scale; tiny on purpose

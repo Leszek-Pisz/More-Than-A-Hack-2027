@@ -273,7 +273,174 @@ def add_noise(table, slots, rng, labels=None):
     return t, knobs
 
 
+# ---------------------------------------------------------------- IDSSE (Bundesliga, DFL)
+# 7 games, CC-BY 4.0. Bassek et al. 2025, Scientific Data, figshare 10.6084/m9.figshare.28196177
+# The ball frames carry BallPossession (1 home / 2 guest) and BallStatus (1 alive / 0 dead) for
+# every frame, i.e. the same kind of truth the organisers built our GT from.
+
+IDSSE = ROOT / "data" / "external" / "idsse"
+IDSSE_GAMES = ("J03WMX", "J03WN1", "J03WOH", "J03WOY", "J03WPY", "J03WQQ", "J03WR9")
+
+
+def _attr(line, key):
+    i = line.find(f' {key}="')
+    if i < 0:
+        return None
+    i += len(key) + 3
+    return line[i:line.index('"', i)]
+
+
+def _idsse_game(match):
+    info = next(IDSSE.glob(f"DFL_02_01_matchinformation_*{match}.xml"))
+    root = ET.parse(info).getroot()
+    team_role = {t.get("TeamId"): t.get("Role") for t in root.iter("Team")}
+
+    # stream the big positions file line by line, way faster than a full XML parse
+    pos = next(IDSSE.glob(f"DFL_04_03_positions_raw_observed_*{match}.xml"))
+    series = {}       # (section, team, person) -> (frames, x, y, s, poss, status)
+    cur = None
+    with open(pos, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("<FrameSet"):
+                key = (_attr(line, "GameSection"), _attr(line, "TeamId"), _attr(line, "PersonId"))
+                cur = series.setdefault(key, ([], [], [], [], [], []))
+            elif line.startswith("<Frame ") and cur is not None:
+                cur[0].append(int(_attr(line, "N")))
+                cur[1].append(float(_attr(line, "X")))
+                cur[2].append(float(_attr(line, "Y")))
+                cur[3].append(float(_attr(line, "S") or "nan"))
+                cur[4].append(int(_attr(line, "BallPossession") or 0))
+                cur[5].append(int(_attr(line, "BallStatus") or 0))
+
+    halves = [s for s in ("firstHalf", "secondHalf")]
+    tables, labels, offset = [], [], 0
+    slot_of, tracks = {}, []
+    for h, section in enumerate(halves, start=1):
+        ball = next(v for k, v in series.items() if k[0] == section and k[1] == "BALL")
+        n0 = ball[0][0]
+        n = ball[0][-1] - n0 + 1
+        t = {"frame": np.arange(n) + offset, "half": np.full(n, h),
+             "ball_x": np.full(n, np.nan), "ball_y": np.full(n, np.nan)}
+        idx = np.array(ball[0]) - n0
+        t["ball_x"][idx] = np.array(ball[1]) + 52.5
+        t["ball_y"][idx] = np.array(ball[2]) + 34.0
+        lab = np.full(n, D, dtype=np.int8)
+        poss, status = np.array(ball[4]), np.array(ball[5])
+        lab[idx] = np.where(status == 0, D, np.where(poss == 1, H, A))
+        for (sec, team, person), v in series.items():
+            if sec != section or team not in team_role:
+                continue
+            if person not in slot_of:
+                slot_of[person] = len(slot_of) + 1
+                tracks.append({"slot": slot_of[person],
+                               "team": "H" if team_role[team] == "home" else "A"})
+            s = slot_of[person]
+            for col in ("x", "y", "v"):
+                t.setdefault(f"p{s}_{col}", np.full(n, np.nan))
+            i = np.array(v[0]) - n0
+            ok = (i >= 0) & (i < n)
+            t[f"p{s}_x"][i[ok]] = np.array(v[1])[ok] + 52.5
+            t[f"p{s}_y"][i[ok]] = np.array(v[2])[ok] + 34.0
+            t[f"p{s}_v"][i[ok]] = np.array(v[3])[ok] / 3.6     # DFL gives km/h
+        tables.append(pd.DataFrame(t))
+        labels.append(lab)
+        labels.append(np.array([X], dtype=np.int8))   # one ungraded frame between halves
+        offset += n + 1
+
+    table = pd.concat(tables, ignore_index=True)
+    # players missing in one half get all-NaN columns
+    cols = [f"p{s}_{c}" for s in range(1, len(slot_of) + 1) for c in ("x", "y", "v")]
+    table = table.reindex(columns=["frame", "half", "ball_x", "ball_y"] + cols)
+    return table, pd.DataFrame(tracks), np.concatenate(labels)[:-1]
+
+
+# ---------------------------------------------------------------- SkillCorner (A-League)
+# 10 games, MIT licence, github.com/SkillCorner/opendata. Broadcast tracking at 10 fps, so it's
+# naturally full of holes: we keep only what was really detected (is_detected), resample to 25 fps
+# and DON'T add our own noise. Truth: phases of play (only defined while the ball is in play,
+# with the team in possession) -> H/A inside a phase, D between phases. Used as the exam only.
+
+SKILLCORNER = ROOT / "data" / "external" / "skillcorner-opendata" / "data" / "matches"
+
+
+def skillcorner_games():
+    return tuple(f"sc{p.name}" for p in sorted(SKILLCORNER.iterdir()) if p.is_dir())
+
+
+def _skillcorner_game(match):
+    folder = SKILLCORNER / match
+    meta = json.loads((folder / f"{match}_match.json").read_text(encoding="utf-8"))
+    L, W = meta["pitch_length"], meta["pitch_width"]
+    home_id = meta["home_team"]["id"]
+    team_of = {p["id"]: ("H" if p["team_id"] == home_id else "A") for p in meta["players"]}
+    slot_of = {pid: i + 1 for i, pid in enumerate(team_of)}
+
+    rows = []
+    with open(folder / f"{match}_tracking_extrapolated.jsonl", encoding="utf-8") as f:
+        for line in f:
+            fr = json.loads(line)
+            if fr["period"] is None:
+                continue
+            b = fr["ball_data"]
+            r = {"f10": fr["frame"], "half": fr["period"],
+                 "ball_x": b["x"] if b["is_detected"] else None,
+                 "ball_y": b["y"] if b["is_detected"] else None}
+            for p in fr["player_data"]:
+                s = slot_of.get(p["player_id"])
+                if s is None:
+                    continue
+                r[f"p{s}_ex"], r[f"p{s}_ey"] = p["x"], p["y"]          # extrapolated
+                if p["is_detected"]:
+                    r[f"p{s}_x"], r[f"p{s}_y"] = p["x"], p["y"]
+            rows.append(r)
+    raw = pd.DataFrame(rows).set_index("f10").sort_index()
+
+    # 10 fps -> 25 fps, linear between neighbours, never across a hole
+    f10 = raw.index.to_numpy()
+    t25 = np.arange(f10[0] * 2.5, f10[-1] * 2.5 + 1)
+    pos = t25 / 2.5
+    lo = np.searchsorted(f10, np.floor(pos), side="right") - 1
+    lo = np.clip(lo, 0, len(f10) - 1)
+    hi = np.clip(lo + 1, 0, len(f10) - 1)
+    w = np.clip(pos - f10[lo], 0, 1)
+    out = {"frame": np.arange(len(t25)), "half": raw["half"].to_numpy()[lo]}
+
+    def interp(col):
+        v = raw[col].to_numpy(dtype=float) if col in raw else np.full(len(raw), np.nan)
+        return v[lo] * (1 - w) + v[hi] * w
+
+    # SkillCorner coords are centred
+    out["ball_x"] = interp("ball_x") + L / 2
+    out["ball_y"] = interp("ball_y") + W / 2
+    tracks = []
+    for pid, s in slot_of.items():
+        out[f"p{s}_x"] = interp(f"p{s}_x") + L / 2
+        out[f"p{s}_y"] = interp(f"p{s}_y") + W / 2
+        ex, ey = interp(f"p{s}_ex"), interp(f"p{s}_ey")
+        # speed from the extrapolated (smooth) track, a tracker would also give a filtered one
+        v = np.hypot(np.diff(ex, prepend=np.nan), np.diff(ey, prepend=np.nan)) * FPS
+        out[f"p{s}_v"] = pd.Series(v).rolling(25, center=True, min_periods=5).mean().to_numpy()
+        tracks.append({"slot": s, "team": team_of[pid]})
+    table = pd.DataFrame(out)
+
+    # truth from phases of play
+    phases = pd.read_csv(folder / f"{match}_phases_of_play.csv")
+    labels = np.full(len(table), X, dtype=np.int8)
+    for h in (1, 2):
+        rows_h = np.flatnonzero(table["half"].to_numpy() == h)
+        if len(rows_h):
+            labels[rows_h] = D
+    for ph in phases.itertuples():
+        a = int(round((ph.frame_start - f10[0]) * 2.5))
+        b = int(round((ph.frame_end - f10[0]) * 2.5))
+        labels[max(a, 0):max(b, 0)] = H if ph.team_in_possession_id == home_id else A
+    return table, pd.DataFrame(tracks), labels, (float(L), float(W))
+
+
 # ---------------------------------------------------------------- cache
+
+TUNE_GAMES = GAMES + tuple(f"idsse_{m}" for m in IDSSE_GAMES)
+
 
 def load(name):
     """(table, tracks, labels) for one game, from the cache."""
@@ -283,21 +450,37 @@ def load(name):
     return table, tracks, labels
 
 
-def main():
+def _save(name, table, tracks, labels):
+    table.to_parquet(OUT / f"{name}_tracking.parquet", index=False)
+    tracks.to_parquet(OUT / f"{name}_tracks.parquet", index=False)
+    np.save(OUT / f"{name}_labels.npy", labels)
+    graded = labels[labels != X]
+    dead = (graded == D).mean()
+    seg = np.flatnonzero(np.diff(labels) != 0)
+    n_poss = sum(1 for i in seg if labels[i + 1] in (H, A))
+    poss_s = (graded != D).sum() / FPS / max(n_poss, 1)
+    print(f"{name}: {len(graded) / FPS / 60:.0f} min graded, dead {dead:.0%}, "
+          f"{n_poss} possessions of mean {poss_s:.1f} s, {len(tracks)} slots", flush=True)
+
+
+def main(which=("metrica", "idsse", "skillcorner")):
     OUT.mkdir(parents=True, exist_ok=True)
-    loaders = {"metrica1": lambda: _csv_game(1), "metrica2": lambda: _csv_game(2),
-               "metrica3": _game3}
-    for name in GAMES:
-        table, tracks, events = loaders[name]()
-        labels = labels_from_events(events, table, int(table["frame"].max()) + 1)
-        table.to_parquet(OUT / f"{name}_tracking.parquet", index=False)
-        tracks.to_parquet(OUT / f"{name}_tracks.parquet", index=False)
-        np.save(OUT / f"{name}_labels.npy", labels)
-        counts = {k: int((labels == i).sum()) for i, k in enumerate("HADX")}
-        spells = int(np.sum(np.diff(labels) != 0))
-        print(f"{name}: {len(table)} frames, {len(tracks)} slots, labels {counts}, "
-              f"~{spells} label changes")
+    if "metrica" in which:
+        loaders = {"metrica1": lambda: _csv_game(1), "metrica2": lambda: _csv_game(2),
+                   "metrica3": _game3}
+        for name in GAMES:
+            table, tracks, events = loaders[name]()
+            _save(name, table, tracks,
+                  labels_from_events(events, table, int(table["frame"].max()) + 1))
+    if "idsse" in which:
+        for m in IDSSE_GAMES:
+            _save(f"idsse_{m}", *_idsse_game(m))
+    if "skillcorner" in which:
+        for name in skillcorner_games():
+            table, tracks, labels, pitch = _skillcorner_game(name[2:])
+            _save(name, table, tracks, labels)
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(tuple(sys.argv[1:]) or ("metrica", "idsse", "skillcorner"))
