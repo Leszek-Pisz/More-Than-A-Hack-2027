@@ -19,6 +19,7 @@ import pandas as pd
 
 import decode
 import events
+import shape_model
 import tags_prior
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -112,6 +113,8 @@ def evidence(table, slots_h, slots_a, p, pitch=(PITCH_LENGTH, PITCH_WIDTH)):
 
     if p.get("events", {}).get("enabled"):
         loglik += events.extra_evidence(bx, by, dist_h, dist_a, p, pitch)
+    if p.get("shape", {}).get("enabled"):
+        loglik += shape_model.half_loglik(table, slots_h, slots_a, p, pitch)
     return loglik
 
 
