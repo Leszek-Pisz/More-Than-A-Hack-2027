@@ -6,6 +6,10 @@
 Each run: take a clean game, add random tracking noise, label it, score it with the organisers'
 own metric code against the labels from events. We also score the organisers' smooth50
 baseline on the same noisy data, as a reference point (on the real match it gets 0.2433).
+
+Careful: with [shape] enabled this uses models/shape_model.json, which was trained on these same
+Metrica games, so the number comes out too good. Honest numbers with module 5: shape_model.py --eval
+and tune.py (held-out shape models).
 """
 
 import argparse

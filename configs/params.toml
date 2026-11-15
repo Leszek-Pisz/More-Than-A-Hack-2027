@@ -1,5 +1,7 @@
 # All the numbers in one place. Started as hand-picked guesses (football knowledge), then tuned with src/tune.py
 # on Metrica (3 games) + IDSSE Bundesliga (7 games), each league weighted the same (14.11). Never on this match / its GT.
+# Re-tuned 15.11 together with module 5 (held-out shape models, 150 trials): fresh noise Metrica 0.487 -> 0.496,
+# IDSSE 0.378 -> 0.396, SkillCorner exam 0.485 -> 0.511.
 
 [submission]
 name = "m0_baseline"          # file goes to evaluation/results/<name>.csv
@@ -12,45 +14,45 @@ out_margin = 0.5              # m past the line before we call it out
 window_s = 4.365
 # avg player speed (mean, sd) in m/s. ~10.5 km per player over ~95 min is ~1.9 m/s overall,
 # and when play stops people basically walk (~1-1.4 m/s)
-alive_mean = 2.324
+alive_mean = 1.873
 alive_sd = 1.097
-dead_mean = 1.383
+dead_mean = 0.986
 dead_sd = 0.752
 
 [evidence]
 control_radius = 1.599          # m
-p_nearest_is_owner = 0.755
+p_nearest_is_owner = 0.686
 p_missing_alive = 0.496        # ball not tracked while in play
-p_missing_dead = 0.562         # ball not tracked while dead
+p_missing_dead = 0.417         # ball not tracked while dead
 p_out_alive = 0.01
-p_out_dead = 0.226
+p_out_dead = 0.271
 
 [hmm]
 # rough football averages: a possession ~10 s, a stoppage ~15 s,
 # half of possessions end with a turnover, half with the ball going dead
-possession_mean_s = 24.165
-dead_mean_s = 39.31
-p_turnover = 0.5
+possession_mean_s = 8.699
+dead_mean_s = 23.957
+p_turnover = 0.66
 
 [events]
 # module 4, tuned together with the rest (see top)
 enabled = true
 use_still = true
 still_speed = 0.732             # m/s, ball "not moving"
-still_s = 1.453                 # ...for at least this long
+still_s = 1.753                 # ...for at least this long
 p_still_dead = 0.5            # how often the ball stands still in a stoppage vs in play
-p_still_alive = 0.035
+p_still_alive = 0.083
 use_spots = true              # standing still on a corner / touchline / goal area / centre spot
 p_spot_dead = 0.6
 p_spot_alive = 0.497
 use_gap_after_line = true     # ball vanished right at / past a line
-line_margin = 2.698             # m
+line_margin = 2.52              # m
 p_gapline_dead = 0.7
-p_gapline_alive = 0.575
+p_gapline_alive = 0.327
 use_control = true            # a player stays by the ball, no opponent near
 control_radius = 1.288          # m
-control_s = 0.543
-p_control_is_owner = 0.619
+control_s = 0.407
+p_control_is_owner = 0.569
 
 [decoder]
 # module 7. "hmm" = plain Viterbi from baseline.py, "hsmm" = decode.py with length priors
@@ -76,8 +78,9 @@ weight = 0.05                 # per frame, log scale; tiny on purpose
 # module 5 (shape_model.py): team shape -> P(home has the ball), model in models/shape_model.json,
 # trained on Metrica + IDSSE only. Mode and weight picked by `shape_model.py --eval` on the held-out
 # leagues (15.11): always w=0.1 -> Metrica 0.448 -> 0.487 (3/3 games better), IDSSE 0.336 -> 0.378
-# (7/7), SkillCorner exam 0.453 -> 0.485 (20/20). Never looked at our match.
+# (7/7), SkillCorner exam 0.453 -> 0.485 (20/20). Weight then re-tuned with the rest (see top).
+# Never looked at our match.
 enabled = true
 mode = "always"               # "ball_missing" = only where the ball isn't tracked, "always" = every frame
-weight = 0.1                  # per frame, log scale (neighbouring frames aren't independent)
+weight = 0.061                # per frame, log scale (neighbouring frames aren't independent)
 clip = 4.0                    # cap on the shape logit, so one odd frame can't shout

@@ -8,6 +8,10 @@ Simple search: start from a params file, each trial changes ~30% of the numbers 
 so far and keeps it if it scores better. Score = mean spellF1 per league (Metrica, IDSSE), games
 with our random tracking noise. Re-checked on fresh noise, then the SkillCorner exam (real
 broadcast holes, never tuned on). Fixed seeds, so it's reproducible.
+
+Module 5 (shape model, when [shape] enabled): every game is scored with a shape model trained on
+the OTHER league (SkillCorner: on both, it never saw any of those). Otherwise the shape clue would
+look better on the tuning games than on a new match and the search would trust it too much.
 """
 
 import argparse
@@ -24,6 +28,7 @@ sys.path.insert(0, str(ROOT / "evaluation"))
 import baseline  # noqa: E402
 import external  # noqa: E402
 import possession_metrics as pm  # noqa: E402
+import shape_model  # noqa: E402
 
 # (section, key, low, high, log scale?)
 SPACE = [
@@ -50,6 +55,10 @@ SPACE = [
     ("events", "control_s", 0.1, 1.0, False),
     ("events", "p_control_is_owner", 0.55, 0.97, False),
 ]
+# only used when [shape] enabled = true
+SPACE_SHAPE = [
+    ("shape", "weight", 0.02, 0.5, True),
+]
 # only used when [decoder] type = "hsmm"
 SPACE_HSMM = [
     ("decoder", "evidence_scale", 0.1, 1.5, True),
@@ -61,6 +70,38 @@ LEAGUES = {"metrica": external.GAMES,
            "idsse": tuple(f"idsse_{m}" for m in external.IDSSE_GAMES)}
 
 
+_SHAPE_MODELS = {}
+
+
+def shape_model_for(name):
+    # held-out shape model: trained on the other league, or on both for SkillCorner
+    key = ("idsse" if name in LEAGUES["metrica"] else
+           "metrica" if name in LEAGUES["idsse"] else "both")
+    if key not in _SHAPE_MODELS:
+        games = LEAGUES["metrica"] + LEAGUES["idsse"] if key == "both" else LEAGUES[key]
+        _SHAPE_MODELS[key] = shape_model.train(games)
+    return _SHAPE_MODELS[key]
+
+
+def shape_inputs(name, table, tracks, n):
+    # the shape logit doesn't depend on any tuned number, so it's computed once per game
+    feats = shape_model.match_features(table, tracks, external.PITCH, n)
+    z = shape_model.logit(feats, shape_model_for(name))
+    missing = np.ones(n)
+    missing[table["frame"].to_numpy()] = np.isnan(table["ball_x"].to_numpy(np.float64))
+    return z, missing
+
+
+def label(p, table, tracks, n, shape):
+    s = p.get("shape", {})
+    if not s.get("enabled"):
+        return baseline.label_match(table, tracks, p, n, external.PITCH)
+    z, missing = shape
+    plain = {**p, "shape": {**s, "enabled": False}}     # added via extra= instead
+    return baseline.label_match(table, tracks, plain, n, external.PITCH,
+                                extra=shape_model.loglik_from_logit(z, s, missing))
+
+
 def make_sets(seeds, games):
     sets = []
     for name in games:
@@ -68,14 +109,14 @@ def make_sets(seeds, games):
         for seed in seeds:
             noisy, _ = external.add_noise(table, tracks["slot"].tolist(),
                                           np.random.default_rng(seed), gt)
-            sets.append((name, noisy, tracks, gt))
+            sets.append((name, noisy, tracks, gt, shape_inputs(name, noisy, tracks, len(gt))))
     return sets
 
 
 def score(p, sets):
     out = []
-    for _, noisy, tracks, gt in sets:
-        pred = baseline.label_match(noisy, tracks, p, len(gt), external.PITCH)
+    for _, noisy, tracks, gt, shape in sets:
+        pred = label(p, noisy, tracks, len(gt), shape)
         r = pm.evaluate(gt, pred)
         out.append((r["spell_f1_mean"], r["macro_f1"], r["n_pred_spells"], r["n_gt_spells"]))
     return np.array(out, dtype=float)
@@ -90,11 +131,15 @@ def objective(p, sets):
     return float(np.mean(per))
 
 
+def space_of(p):
+    return (SPACE + (SPACE_HSMM if p.get("decoder", {}).get("type") == "hsmm" else [])
+            + (SPACE_SHAPE if p.get("shape", {}).get("enabled") else []))
+
+
 def sample(best, rng, share=0.3):
     # change ~30% of the numbers of the best set so far, keep the rest
     p = copy.deepcopy(best)
-    space = SPACE + (SPACE_HSMM if p.get("decoder", {}).get("type") == "hsmm" else [])
-    for sec, key, lo, hi, log in space:
+    for sec, key, lo, hi, log in space_of(p):
         if rng.random() > share:
             continue
         p[sec][key] = float(np.exp(rng.uniform(np.log(lo), np.log(hi))) if log
@@ -141,12 +186,17 @@ def cross_validate(args, base):
         report(f"  result on {test}:", score(base, sets), score(best_p, sets), sets)
 
 
+_EXAM_SHAPE = {}
+
+
 def exam(p):
     # SkillCorner: real broadcast tracking holes, no added noise, never tuned on
     rows = []
     for name in external.skillcorner_games():
         table, tracks, gt = external.load(name)
-        pred = baseline.label_match(table, tracks, p, len(gt), external.PITCH)
+        if name not in _EXAM_SHAPE:
+            _EXAM_SHAPE[name] = shape_inputs(name, table, tracks, len(gt))
+        pred = label(p, table, tracks, len(gt), _EXAM_SHAPE[name])
         r = pm.evaluate(gt, pred)
         rows.append((r["spell_f1_mean"], r["macro_f1"], r["n_pred_spells"], r["n_gt_spells"]))
     rows = np.array(rows)
@@ -184,8 +234,7 @@ def main():
     exam(best_p)
 
     print("\nbest params:")
-    space = SPACE + (SPACE_HSMM if best_p.get("decoder", {}).get("type") == "hsmm" else [])
-    for sec, key, *_ in space:
+    for sec, key, *_ in space_of(best_p):
         print(f"  [{sec}] {key} = {best_p[sec][key]:.3f}")
 
 
