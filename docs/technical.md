@@ -274,7 +274,7 @@ uv run python evaluation/validate_submission.py "evaluation/results/Leszek Pisz.
 ```
 
 We ran it twice from the raw files and got the same file both times, sha256
-`b75d370b25da73a650845ec984fdb0ea8337efe2aa9a32f43e604eab56383e5e`.
+`51b7fd02bc60a0d71b9c176a644b0ba0130367e647777766e0c4a797f899a9d0`.
 
 You don't need any external data for this. The tuned numbers are in `configs/params.toml` and the
 shape model in `models/shape_model.json`. To redo the tuning (external data in
