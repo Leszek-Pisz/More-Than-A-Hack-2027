@@ -7,7 +7,7 @@
 # (0.506) worse, so we kept these numbers and fixed the new ones up front.
 
 [submission]
-name = "Leszek-Pisz"          # team name, file goes to evaluation/results/<name>.csv
+name = "Leszek Pisz"          # team name, file goes to evaluation/results/<name>.csv
 
 [ball]
 max_speed = 40.0              # m/s, even the hardest shots are ~35, so faster = tracking glitch

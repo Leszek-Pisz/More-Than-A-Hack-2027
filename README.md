@@ -1,6 +1,6 @@
 # More-Than-A-Hack-2027
 
-Team **Leszek-Pisz**, possession labelling for BAR-ATH (More Than A Hack 2027).
+Team **Leszek Pisz**, possession labelling for BAR-ATH (More Than A Hack 2027).
 
 Tracking in, one label per frame out: `H` (Barcelona has the ball), `A` (Athletic), `D` (dead
 ball). An HMM over per-frame clues (player tempo, ball state, who's near the ball, team shape),
@@ -13,7 +13,7 @@ Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync                          # .venv with the exact versions from uv.lock
-uv run python src/predict.py     # raw data -> evaluation/results/Leszek-Pisz.csv
+uv run python src/predict.py     # raw data -> evaluation/results/Leszek Pisz.csv
 ```
 
 `predict.py` converts the raw files to Parquet (`src/convert_data.py`), labels the match
@@ -23,7 +23,7 @@ the same file byte for byte. The team name lives in `configs/params.toml` (`[sub
 Check the format:
 
 ```bash
-uv run python evaluation/validate_submission.py evaluation/results/Leszek-Pisz.csv
+uv run python evaluation/validate_submission.py "evaluation/results/Leszek Pisz.csv"
 ```
 
 ## Match data

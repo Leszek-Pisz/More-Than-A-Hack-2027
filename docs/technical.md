@@ -1,7 +1,7 @@
-# Leszek-Pisz: technical document
+# Leszek Pisz: technical document
 
 More Than A Hack 2027, possession for BAR-ATH. The code is in this repo, the submission file is
-`evaluation/results/Leszek-Pisz.csv`.
+`evaluation/results/Leszek Pisz.csv`.
 
 ## 1. What we did
 
@@ -219,8 +219,8 @@ train a proper sequence model.
 ```bash
 uv sync                          # exact versions from uv.lock
 # match files go in data/tactical/ and data/broadcast/ (see README)
-uv run python src/predict.py     # writes evaluation/results/Leszek-Pisz.csv, prints its sha256
-uv run python evaluation/validate_submission.py evaluation/results/Leszek-Pisz.csv
+uv run python src/predict.py     # writes evaluation/results/Leszek Pisz.csv, prints its sha256
+uv run python evaluation/validate_submission.py "evaluation/results/Leszek Pisz.csv"
 ```
 
 We ran it twice from the raw files and got the same file both times, sha256
