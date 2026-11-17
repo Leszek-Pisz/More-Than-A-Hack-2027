@@ -129,7 +129,8 @@ so we just read it. Used for tuning and the shape model.
 
 SkillCorner open data (github.com/SkillCorner/opendata, MIT). 20 A-League games, broadcast
 tracking at 10 fps. Labels come from SkillCorner's automatic "phases of play": H/A inside a
-phase, D between phases. Used only as an exam, we never tuned on it. We keep only positions that
+phase, D between phases. Used only as an exam: no number was ever fitted on it, but we did use it (together with the
+two leagues) to decide whether to keep a change, so it's not a perfectly clean test any more. We keep only positions that
 were really detected, resample to 25 fps and add no noise, since the holes there are real.
 
 Metrica and IDSSE tracking is clean, so we mess it up ourselves (`external.add_noise`). The ball

@@ -64,7 +64,7 @@ to redo the tuning.
 |---|---|---|---|
 | [Metrica sample data](https://github.com/metrica-sports/sample-data), 3 games | tuning + training | free to use, credit Metrica Sports | `data/external/metrica-sample-data/` (`git clone`) |
 | [IDSSE](https://doi.org/10.6084/m9.figshare.28196177), 7 Bundesliga games (Bassek et al. 2025, Scientific Data) | tuning + training | CC-BY 4.0 | `data/external/idsse/` (the `DFL_02_01_matchinformation_*` and `DFL_04_03_positions_raw_observed_*` XMLs) |
-| [SkillCorner open data](https://github.com/SkillCorner/opendata), A-League | exam only, never tuned on | MIT | `data/external/skillcorner-opendata/` (`git clone`) |
+| [SkillCorner open data](https://github.com/SkillCorner/opendata), A-League | exam: no numbers fitted on it, used to keep/drop changes | MIT | `data/external/skillcorner-opendata/` (`git clone`) |
 
 ### Redo the tuning
 
