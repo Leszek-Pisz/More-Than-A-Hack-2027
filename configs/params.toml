@@ -2,6 +2,9 @@
 # on Metrica (3 games) + IDSSE Bundesliga (7 games), each league weighted the same (14.11). Never on this match / its GT.
 # Re-tuned 15.11 together with module 5 (held-out shape models, 150 trials): fresh noise Metrica 0.487 -> 0.496,
 # IDSSE 0.378 -> 0.396, SkillCorner exam 0.485 -> 0.511.
+# Then ball gap filling, restart clue and the press shape feature (not tuned, all three on):
+# Metrica 0.501, IDSSE 0.400, exam 0.515. Tuning again with them made IDSSE (0.365) and the exam
+# (0.506) worse, so we kept these numbers and fixed the new ones up front.
 
 [submission]
 name = "Leszek-Pisz"          # team name, file goes to evaluation/results/<name>.csv

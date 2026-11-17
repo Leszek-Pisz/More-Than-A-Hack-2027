@@ -11,15 +11,20 @@ tracking. We use a handful of simple clues:
 
 - Tempo. Average player speed over about 4.4 s. When play stops, players walk.
 - Ball state. Is the ball tracked on the pitch, tracked out of play, or not tracked at all?
-  Before that we drop ball positions that would need more than 40 m/s to get to (glitches).
+  Before that we drop ball positions that would need more than 40 m/s to get to (glitches),
+  and patch holes of up to 1 s with a straight line (`src/ball.py`, more in section 5).
 - Nearest player. If someone is within about 1.6 m of the ball, that's a soft vote for their team.
 - Stoppages and control (`src/events.py`). The ball standing still, or standing still on a corner
   / touchline / goal area / centre spot, the ball disappearing right at a line, and "control":
   a player stays by the ball for 0.4 s or more with no opponent close.
+- Who restarts (`src/events.py`). When a ball that stood still starts moving, the team whose
+  player was right next to it, with no opponent within 3 m, gets a small nudge for 3 s. That's
+  usually the team taking the throw-in, corner or free kick.
 - Team shape (`src/shape_model.py`). A small logistic model that guesses who has the ball only
   from how the two teams are standing: the team with the ball pushes up and spreads out, the
-  other one drops and gets compact. It doesn't look at the ball, so it's most useful when the
-  ball isn't tracked.
+  other one drops and gets compact. We also look at pressing: the team without the ball marks,
+  so its players stand closer to their nearest opponent. It doesn't look at the ball, so it's
+  most useful when the ball isn't tracked.
 
 The transitions are sticky: per frame it's very unlikely to leave a possession or a stoppage, so a
 single frame where an opponent happens to be closer doesn't flip the label. That's our whole
@@ -65,6 +70,14 @@ Things we built, checked on the external games, and dropped:
   all over the place (0.8 to 25 s) so a length prior doesn't tell you much, and the blocks blur
   the edges. It's still there as a switch (`[decoder] type`).
 - Using team shape only where the ball is missing. Clearly worse than using it on every frame.
+- "Players in the opponent's half" as a shape feature. A bit better on Metrica, but worse on
+  IDSSE and clearly worse on the exam (17 of 20 games), so it's out. We also thought about the
+  distance between the two teams' centres, but it's the same number for both teams, so home
+  minus away is always zero and it can't tell them apart.
+- Retuning everything after adding the gap filling, the restart clue and pressing. It got a
+  tiny bit better on its own noise, but worse on fresh noise for IDSSE (0.400 to 0.365) and on
+  the exam (0.515 to 0.506). Looks like overfitting, so we kept the old numbers and left the
+  new ones as fixed guesses (1 s holes, 30 m/s, 3 m, 3 s, 0.7).
 - In the Metrica labels, ending a stoppage only at a "SET PIECE" event. Metrica logs goal kicks
   as normal passes, so we got fake 80 s stoppages. Now a stoppage ends at the next on-ball event.
 - Tuning on Metrica only. Fine on Metrica, but on IDSSE it ended up worse than our hand-picked
@@ -111,8 +124,8 @@ league, so the search can't trust it more than it would on a new match.
 
 The shape model is a logistic regression without an intercept, so swapping the teams flips the
 answer exactly and it can't learn "home has the ball more". Per team, in its own attacking
-direction: centroid, most advanced player, back line, length, width, speed towards goal. It
-gets home minus away, smoothed over 2 s. Attacking direction per half comes from the keeper
+direction: centroid, most advanced player, back line, length, width, speed towards goal, and pressing
+(mean distance from each player to the closest opponent). It gets home minus away, smoothed over 2 s. Attacking direction per half comes from the keeper
 (the player whose average x is closest to an end line), no ball or labels needed. The final
 model is trained on all 10 Metrica + IDSSE games with noise (`models/shape_model.json`).
 
@@ -124,9 +137,14 @@ Results (spellF1; Metrica and IDSSE on fresh noise):
 | hand-picked numbers | 0.420* | 0.333* | 0.387 |
 | tuned on both leagues | 0.447 | 0.336 | 0.453 |
 | plus team shape | 0.487 | 0.378 | 0.485 |
-| everything retuned (submitted) | 0.496 | 0.396 | 0.511 |
+| everything retuned | 0.496 | 0.396 | 0.511 |
+| plus gap filling, restart clue, pressing (submitted) | 0.501 | 0.400 | 0.515 |
 
 \* these two come from the league-to-league runs.
+
+Each of the three last additions on its own was no worse on any league, except the restart
+clue, which lost a hair on Metrica (0.4965 to 0.4960) but gained on the exam (0.511 to 0.514).
+Together they're better on all three. Checked with `src/compare.py`.
 
 Team shape made every single game better: 3/3 Metrica, 7/7 IDSSE, 20/20 SkillCorner. smooth50
 gets 0.2433 on the real match and 0.33 on our noisy Metrica, so our noise is probably nicer than
@@ -149,7 +167,8 @@ it until someone clearly comes out with the ball.
 Restarts: D starts when the ball goes out (0.5 m past a line, or disappearing right at a line) or
 when play stops and players slow down to walking. D ends when play picks up again and the ball
 leaves its spot. The team taking the restart gets possession from then on, through the
-nearest-player and control clues. Throw-ins, corners, goal kicks and free kicks all work like
+nearest-player and control clues, and the restart clue (whoever stood by the still ball while
+the opponents kept their distance). Throw-ins, corners, goal kicks and free kicks all work like
 this, and a ball standing still on a set-piece spot counts as extra evidence for D.
 
 Frames outside the two halves are D (they aren't graded anyway).
@@ -157,6 +176,10 @@ Frames outside the two halves are D (they aren't graded anyway).
 ## 5. Missing and noisy tracking
 
 Ball positions that would need more than 40 m/s are thrown out, the hardest shots are around 35.
+
+Short holes in the ball, up to 1 s, get a straight line between the last and next position, but
+only if the ball wouldn't need more than 30 m/s for that. Mid-pass the ball is still in play and
+roughly on that line. Longer holes stay empty, after a second anything could have happened.
 
 When the ball is missing, that frame gives no "who's near" vote and only a weak hint about alive
 vs dead (tuned: the ball is missing in 50% of alive frames and 42% of dead ones). The HMM just
@@ -201,7 +224,7 @@ uv run python evaluation/validate_submission.py evaluation/results/Leszek-Pisz.c
 ```
 
 We ran it twice from the raw files and got the same file both times, sha256
-`2c7a384b3bb7aa7549534612022fbc926e116821632f3ecaac264f4a5282b1e3`.
+`a0f84e2d9714bd39c44a7a390df2e8af083b29cd3071a886eb700a490573817a`.
 
 You don't need any external data for this. The tuned numbers are in `configs/params.toml` and the
 shape model in `models/shape_model.json`. To redo the tuning (external data in

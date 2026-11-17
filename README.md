@@ -93,12 +93,14 @@ models/shape_model.json    team-shape model (trained on Metrica + IDSSE)
 src/predict.py             one command: raw data -> submission
 src/convert_data.py        raw files -> Parquet
 src/baseline.py            per-frame clues + HMM + Viterbi
-src/events.py              stoppage and ball-control clues
+src/ball.py                patch short holes in the ball track
+src/events.py              stoppage, ball-control and restart clues
 src/shape_model.py         team shape -> who has the ball
 src/decode.py              semi-Markov decoder (tried, off)
 src/tags_prior.py          Smart Tagging hint (tried, off)
 src/external.py            external games, labels, tracking noise
 src/tune.py, validate.py   tuning and scoring on the external games
+src/compare.py             switch things on/off, score on fresh noise + the exam
 ```
 
 `evaluation/` and `games.py` are copied unmodified from
