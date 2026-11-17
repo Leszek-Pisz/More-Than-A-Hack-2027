@@ -86,7 +86,7 @@ def main(variants=VARIANTS):
     results = {}
     for vname, (changes, features) in variants.items():
         results[vname] = run(with_changes(base_p, changes), features, games)
-        ref = results.get("base", results[vname])
+        ref = next(iter(results.values()))      # the first variant is the reference
         line = []
         for lg in ("metrica", "idsse", "exam"):
             names = [n for n in ref if league(n) == lg]

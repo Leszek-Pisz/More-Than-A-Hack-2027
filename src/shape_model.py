@@ -13,6 +13,8 @@ Per frame and per team, in the team's own attacking direction (distance from its
   push       mean speed towards the opponent's goal
   press      mean distance from each player to the nearest opponent (free vs marked)
   in_opp     how many players are in the opponent's half
+  compact    mean distance from each player to the team's centre (defending teams squeeze)
+  speed_sd   how different the players' speeds are (attackers make runs, defenders shuffle)
 Which of these the model uses is FEATURES (saved in the model file too).
 The model sees home minus away for each, smoothed over WINDOW_S. A logistic regression with no
 intercept: swapping the teams flips the answer exactly, so it can't learn "home has the ball more".
@@ -40,8 +42,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "models" / "shape_model.json"
 FPS = 25
 H, A, D = 0, 1, 2
-ALL_FEATURES = ("centroid", "front", "back_line", "length", "width", "push", "press", "in_opp")
-FEATURES = ("centroid", "front", "back_line", "length", "width", "push", "press")   # in_opp: hurt the exam
+ALL_FEATURES = ("centroid", "front", "back_line", "length", "width", "push", "press", "in_opp",
+                "compact", "speed_sd")
+FEATURES = ("centroid", "front", "back_line", "length", "width", "push", "press")   # in_opp, compact, speed_sd: hurt the exam
 
 # fixed up front, not tuned:
 WINDOW_S = 2.0       # a team needs a couple of seconds to change shape, so smooth over that
@@ -137,7 +140,16 @@ def _press(px, py, ox, oy):
 def _extra(px, py, ox, oy, defends_left, length):
     u = px if defends_left else length - px
     n_vis = (~np.isnan(u)).sum(axis=1)
-    feats = np.column_stack([_press(px, py, ox, oy), np.sum(u > length / 2, axis=1)]).astype(float)
+    cx = _quiet(np.nanmean, px, axis=1)[:, None]
+    cy = _quiet(np.nanmean, py, axis=1)[:, None]
+    k = max(1, int(PUSH_S * FPS / 2))
+    speed = np.hypot(_shift(px, k) - _shift(px, -k), _shift(py, k) - _shift(py, -k)) / (2 * k / FPS)
+    feats = np.column_stack([
+        _press(px, py, ox, oy),
+        np.sum(u > length / 2, axis=1),
+        _quiet(np.nanmean, np.hypot(px - cx, py - cy), axis=1),
+        _quiet(np.nanstd, speed, axis=1),
+    ]).astype(float)
     feats[n_vis < MIN_PLAYERS] = np.nan
     return feats
 

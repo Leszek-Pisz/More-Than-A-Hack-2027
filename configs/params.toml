@@ -15,6 +15,9 @@ out_margin = 0.5              # m past the line before we call it out
 fill_gaps = true              # ball.py: patch short holes with a straight line
 fill_max_s = 1.0              # only holes up to this long, longer ones stay empty
 fill_speed = 30.0             # m/s, skip the patch if the ball would need to go faster
+smooth = false                # ball.py: average out jitter, but not across gaps or kicks
+smooth_window = 5             # frames (0.2 s)
+kick_dv = 4.0                 # m/s change in ball velocity within ~0.25 s = a touch
 
 [tempo]
 window_s = 4.365
@@ -32,6 +35,9 @@ p_missing_alive = 0.496        # ball not tracked while in play
 p_missing_dead = 0.417         # ball not tracked while dead
 p_out_alive = 0.01
 p_out_dead = 0.271
+use_crowd = false             # long ball gaps: weak vote for the team nearest to where players crowd
+crowd_min_s = 1.0             # only gaps at least this long (shorter ones get patched, see [ball])
+p_crowd_is_owner = 0.55
 
 [hmm]
 # rough football averages: a possession ~10 s, a stoppage ~15 s,
@@ -68,6 +74,10 @@ p_restart_team = 0.7
 [decoder]
 # module 7. "hmm" = plain Viterbi from baseline.py, "hsmm" = decode.py with length priors
 type = "hmm"
+refine_edges = true           # hmm only: move H<->A switches to when the new team reached the ball
+refine_s = 1.0                # look this far either side of the switch
+refine_radius = 1.6           # m, "at the ball" (same as [evidence] control_radius)
+snap_to_kicks = false         # prefer moments where the ball really changed direction/speed
 block = 5                     # frames per block (0.2 s)
 max_s = 90.0                  # longest single segment, longer ones get split (no effect on labels)
 evidence_scale = 0.2          # frames next to each other aren't independent, so don't trust the sum

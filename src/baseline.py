@@ -52,6 +52,17 @@ def clean_ball(x, y, max_speed):
     return x, y
 
 
+def prep_ball(table, p):
+    b = p["ball"]
+    bx, by = clean_ball(table["ball_x"].to_numpy(np.float64), table["ball_y"].to_numpy(np.float64),
+                        b["max_speed"])
+    if b.get("fill_gaps"):
+        bx, by = ball.fill_short_gaps(bx, by, b["fill_max_s"], b["fill_speed"])
+    if b.get("smooth"):
+        bx, by = ball.smooth_between_kicks(bx, by, int(b["smooth_window"]), b["kick_dv"])
+    return bx, by
+
+
 def rolling_mean(values, window):
     return pd.Series(values).rolling(window, center=True, min_periods=1).mean().to_numpy()
 
@@ -80,10 +91,7 @@ def evidence(table, slots_h, slots_a, p, pitch=(PITCH_LENGTH, PITCH_WIDTH)):
 
     # ball missing / out / on the pitch
     e = p["evidence"]
-    bx, by = clean_ball(table["ball_x"].to_numpy(np.float64), table["ball_y"].to_numpy(np.float64),
-                        p["ball"]["max_speed"])
-    if p["ball"].get("fill_gaps"):
-        bx, by = ball.fill_short_gaps(bx, by, p["ball"]["fill_max_s"], p["ball"]["fill_speed"])
+    bx, by = prep_ball(table, p)
     missing = np.isnan(bx)
     m = p["ball"]["out_margin"]
     out = ~missing & ((bx < -m) | (bx > pitch[0] + m) | (by < -m) | (by > pitch[1] + m))
@@ -114,11 +122,70 @@ def evidence(table, slots_h, slots_a, p, pitch=(PITCH_LENGTH, PITCH_WIDTH)):
         loglik[mask, other] += np.log(1 - q)
         loglik[mask, D] += np.log(0.5)
 
+    if e.get("use_crowd"):
+        # long ball gaps: guess the ball is where the players crowd, weak vote for the team
+        # closest to that spot
+        long_gap = missing & events._runs_at_least(missing, int(e["crowd_min_s"] * FPS))
+        if long_gap.any():
+            sub = table.loc[long_gap]
+            ph, qh = (sub[[f"p{s}_{c}" for s in slots_h]].to_numpy(np.float64) for c in "xy")
+            pa, qa = (sub[[f"p{s}_{c}" for s in slots_a]].to_numpy(np.float64) for c in "xy")
+            spot = ball.crowd_point(np.hstack([ph, pa]), np.hstack([qh, qa]))
+            dh = np.nanmin(np.where(np.isnan(ph), np.inf, np.hypot(ph - spot[:, [0]], qh - spot[:, [1]])), axis=1)
+            da = np.nanmin(np.where(np.isnan(pa), np.inf, np.hypot(pa - spot[:, [0]], qa - spot[:, [1]])), axis=1)
+            q = e["p_crowd_is_owner"]
+            rows = np.flatnonzero(long_gap)
+            for m, team, other in ((dh < da, H, A), (da < dh, A, H)):
+                loglik[rows[m], team] += np.log(q)
+                loglik[rows[m], other] += np.log(1 - q)
+                loglik[rows[m], D] += np.log(0.5)
+
     if p.get("events", {}).get("enabled"):
         loglik += events.extra_evidence(bx, by, dist_h, dist_a, p, pitch)
     if p.get("shape", {}).get("enabled"):
         loglik += shape_model.half_loglik(table, slots_h, slots_a, p, pitch)
     return loglik
+
+
+def snap_edges(path, dist_h, dist_a, p, kicked=None):
+    # The sticky HMM tends to switch H<->A a bit late, after enough evidence piled up. Move
+    # each switch to the start of the nearest stretch where a player of the new team is
+    # at the ball and closer than the other team, if there's one within refine_s.
+    r = p["decoder"]["refine_radius"]
+    w = int(p["decoder"]["refine_s"] * FPS)
+    path = path.copy()
+    cuts = np.flatnonzero(np.diff(path) != 0) + 1
+    for i, t in enumerate(cuts):
+        old, new = path[t - 1], path[t]
+        if old == D or new == D:
+            continue
+        lo = max(cuts[i - 1] + 1 if i else 1, t - w)
+        hi = min(cuts[i + 1] - 1 if i + 1 < len(cuts) else len(path) - 1, t + w)
+        mine, theirs = (dist_h, dist_a) if new == H else (dist_a, dist_h)
+        close = (mine[lo:hi] <= r) & (mine[lo:hi] < theirs[lo:hi])
+        if kicked is not None and (close & kicked[lo:hi]).any():
+            close = close & kicked[lo:hi]           # a real touch beats just being close
+        starts = np.flatnonzero(np.diff(np.r_[0, close.astype(np.int8)]) == 1) + lo
+        if len(starts) == 0:
+            continue
+        c = starts[np.argmin(np.abs(starts - t))]
+        if c < t:
+            path[c:t] = new
+        elif c > t:
+            path[t:c] = old
+    return path
+
+
+def nearest_dists(table, slots_h, slots_a, p):
+    bx, by = prep_ball(table, p)
+
+    def nearest(slots):
+        px = table[[f"p{s}_x" for s in slots]].to_numpy(np.float64)
+        py = table[[f"p{s}_y" for s in slots]].to_numpy(np.float64)
+        dist = np.hypot(px - bx[:, None], py - by[:, None])
+        return np.nanmin(np.where(np.isnan(dist), np.inf, dist), axis=1)
+    kicked = ball.kicks(bx, by, p["ball"]["kick_dv"]) if p["decoder"].get("snap_to_kicks") else None
+    return nearest(slots_h), nearest(slots_a), kicked
 
 
 def transition_matrix(p):
@@ -167,7 +234,11 @@ def label_match(table, tracks, p, n_frames, pitch=(PITCH_LENGTH, PITCH_WIDTH), e
         if p.get("decoder", {}).get("type") == "hsmm":
             codes[part["frame"].to_numpy()] = decode.hsmm(ll, p)
         else:
-            codes[part["frame"].to_numpy()] = viterbi(ll, log_trans)
+            path = viterbi(ll, log_trans)
+            if p["decoder"].get("refine_edges"):
+                dh, da, kicked = nearest_dists(part, slots_h, slots_a, p)
+                path = snap_edges(path, dh, da, p, kicked)
+            codes[part["frame"].to_numpy()] = path
     return codes
 
 

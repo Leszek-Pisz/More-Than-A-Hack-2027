@@ -143,7 +143,12 @@ def objective(p, sets):
     return float(np.mean(per))
 
 
+ONLY_NEW = False
+
+
 def space_of(p):
+    if ONLY_NEW:
+        return SPACE_FILL + SPACE_RESTART
     return (SPACE + (SPACE_HSMM if p.get("decoder", {}).get("type") == "hsmm" else [])
             + (SPACE_SHAPE if p.get("shape", {}).get("enabled") else [])
             + (SPACE_FILL if p["ball"].get("fill_gaps") else [])
@@ -226,6 +231,8 @@ def main():
     parser.add_argument("--decoder", choices=["hmm", "hsmm"], help="override [decoder] type")
     parser.add_argument("--cv", action="store_true", help="tune on one league, test on the other")
     parser.add_argument("--exam", action="store_true", help="only score params.toml on SkillCorner")
+    parser.add_argument("--only-new", action="store_true",
+                        help="only tune the gap filling + restart numbers, keep the rest")
     parser.add_argument("--from-prior", action="store_true",
                         help="start from params_prior.toml (hand-picked) instead of params.toml")
     args = parser.parse_args()
@@ -234,6 +241,8 @@ def main():
     base = baseline.load_params(path)
     if args.decoder:
         base["decoder"]["type"] = args.decoder
+    global ONLY_NEW
+    ONLY_NEW = args.only_new
     if args.exam:
         return exam(base)
     if args.cv:

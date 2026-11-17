@@ -1,7 +1,7 @@
 # Leszek Pisz: technical document
 
-More Than A Hack 2027, possession for BAR-ATH. The code is in this repo, the submission file is
-`evaluation/results/Leszek Pisz.csv`.
+More Than A Hack 2027, possession for BAR-ATH.
+Code: https://github.com/Leszek-Pisz/More-Than-A-Hack-2027 (all paths below are relative to it). Submission file: `Leszek Pisz.csv`.
 
 ## 1. What we did
 
@@ -28,7 +28,12 @@ tracking. We use a handful of simple clues:
 
 The transitions are sticky: per frame it's very unlikely to leave a possession or a stoppage, so a
 single frame where an opponent happens to be closer doesn't flip the label. That's our whole
-"hysteresis", we don't smooth anything afterwards. All numbers are in `configs/params.toml`, and
+"hysteresis", we don't smooth anything afterwards.
+
+The one thing we do after decoding: a sticky HMM tends to switch H to A a little late, once
+enough evidence has piled up. So each H/A switch is moved, at most 1 s either way, to the start
+of the closest stretch where a player of the new team is at the ball (within 1.6 m) and closer
+than anyone from the other team. Switches into or out of D aren't touched. All numbers are in `configs/params.toml`, and
 all of them were tuned on other matches.
 
 Why this and not something fancier:
@@ -40,7 +45,8 @@ a sticky HMM gives you. Smoothing filters like the organisers' smooth50/125 move
 
 We also can't train anything on this match, no labels, no tuning on its GT, no self-supervision.
 With ~25 numbers that each mean something, a few external games are enough to tune honestly. A
-deep sequence model would need way more labelled tracking than we could get (legally) in time.
+deep sequence model would need way more labelled tracking than our 10 games, and a lot more time
+to build and train than we had left after the main pipeline.
 
 And it's deterministic: no GPU, nothing random at prediction time, so the repo rebuilds the same
 file byte for byte.
@@ -48,13 +54,18 @@ file byte for byte.
 ## 2. What we used and what we dropped
 
 From the match itself we only use the tactical tracking. The broadcast tracking gets converted
-but isn't used: lining up its clock with the tactical one (different offset per camera shot) was
-too much work for the time we had. Videos aren't used either. We planned to run a pretrained YOLO
-ball detector on them, but that's hours of GPU plus the same alignment problem, so we skipped it.
+but isn't used, and neither are the videos. We thought about filling ball gaps from the broadcast
+tracking and from a pretrained YOLO ball detector on the video, but none of our external games
+has a second camera or video, so there's no honest way to check whether it helps, and we only
+kept things we could measure. On top of that it's a lot of work: lining up the broadcast clock
+with the tactical one (a different offset per camera shot), hours of GPU for the detector, and
+GPU inference isn't deterministic, so the detections would have to be saved once as an
+intermediate file. We put that time into the parts we could validate instead.
 Smart Tagging was tried and is switched off (more below).
 
 For tuning and training we used Metrica sample data and IDSSE (Bundesliga), and SkillCorner open
-data only as a final exam. We also looked at PFF FC World Cup 2022 but didn't get to it.
+data only as a final exam. We also looked at PFF FC World Cup 2022, but didn't get to it: it's big, and the three sets
+above already cover event-based truth, per-frame tracking truth and real broadcast holes.
 
 Things we built, checked on the external games, and dropped:
 
@@ -74,6 +85,17 @@ Things we built, checked on the external games, and dropped:
   IDSSE and clearly worse on the exam (17 of 20 games), so it's out. We also thought about the
   distance between the two teams' centres, but it's the same number for both teams, so home
   minus away is always zero and it can't tell them apart.
+- Two more shape features, compactness (mean distance to the team's centre) and how much the
+  players' speeds differ. Both helped a bit on Metrica but made the exam worse.
+- Snapping switches to real touches (the ball's velocity changing by more than 4 m/s within
+  ~0.25 s) instead of just "new team at the ball". Better on both leagues, a bit worse on the
+  exam (0.516 to 0.515), so it's out.
+- Guessing where the ball is during long gaps (where the players crowd) and giving a weak vote
+  to the team closest to that spot. Worse everywhere.
+- Smoothing the ball track between kicks, as a light stand-in for a Kalman filter. Better on the
+  exam, worse on Metrica, so it's out.
+- Tuning only the new numbers (gap filling, restart clue), keeping the rest. Same story as below:
+  better on its own noise, very slightly worse on fresh noise and the exam.
 - Retuning everything after adding the gap filling, the restart clue and pressing. It got a
   tiny bit better on its own noise, but worse on fresh noise for IDSSE (0.400 to 0.365) and on
   the exam (0.515 to 0.506). Looks like overfitting, so we kept the old numbers and left the
@@ -82,8 +104,9 @@ Things we built, checked on the external games, and dropped:
   as normal passes, so we got fake 80 s stoppages. Now a stoppage ends at the next on-ball event.
 - Tuning on Metrica only. Fine on Metrica, but on IDSSE it ended up worse than our hand-picked
   starting numbers (0.269 vs 0.333). So the final tuning uses both leagues, weighted equally.
-- Planned, never started (time): Kalman filter for the ball, broadcast fusion, YOLO, stitching
-  player tracks into 22 identities, a learned sequence model.
+- Not built: broadcast fusion and YOLO (can't be measured, see above), stitching player tracks
+  into 22 identities (everything we do is per team, so it wouldn't change much), a learned
+  sequence model (not enough labelled games, and not enough time to do it properly).
 
 ## 3. Training and tuning data
 
@@ -138,13 +161,16 @@ Results (spellF1; Metrica and IDSSE on fresh noise):
 | tuned on both leagues | 0.447 | 0.336 | 0.453 |
 | plus team shape | 0.487 | 0.378 | 0.485 |
 | everything retuned | 0.496 | 0.396 | 0.511 |
-| plus gap filling, restart clue, pressing (submitted) | 0.501 | 0.400 | 0.515 |
+| plus gap filling, restart clue, pressing | 0.501 | 0.400 | 0.515 |
+| plus moving switches to the ball (submitted) | 0.503 | 0.402 | 0.516 |
 
 \* these two come from the league-to-league runs.
 
 Each of the three last additions on its own was no worse on any league, except the restart
 clue, which lost a hair on Metrica (0.4965 to 0.4960) but gained on the exam (0.511 to 0.514).
-Together they're better on all three. Checked with `src/compare.py`.
+Together they're better on all three. Moving the switches was checked with windows of 0.5, 1
+and 2 s; we picked 1 s because it was best on Metrica + IDSSE, and the exam agreed. All of this
+was checked with `src/compare.py`.
 
 Team shape made every single game better: 3/3 Metrica, 7/7 IDSSE, 20/20 SkillCorner. smooth50
 gets 0.2433 on the real match and 0.33 on our noisy Metrica, so our noise is probably nicer than
@@ -206,29 +232,31 @@ Our noise is probably too gentle (see smooth50 above).
 The tuning ended up with the ball missing in about half of alive frames. If our match loses the
 ball in play a lot more than that, D detection will suffer.
 
-We only use the tactical tracking, broadcast and video are ignored. And the edges come straight
-from the HMM, without detecting actual touches, so they can be a few frames off.
+We only use the tactical tracking, broadcast and video are ignored. H/A switches are moved to
+when the new team reaches the ball, but switches into and out of D come straight from the HMM,
+so those can be a few frames off.
 
-With more time we'd fill ball gaps with the broadcast tracking and a pretrained YOLO (no
-fine-tuning on our video), clean the ball with a Kalman filter that knows about kicks, stitch
+Next steps: fill ball gaps with the broadcast tracking and a pretrained YOLO (no
+fine-tuning on our video), stitch
 players into 22 identities to follow passes, and add more labelled games (PFF World Cup 2022) to
-train a proper sequence model.
+train a proper sequence model. For broadcast and YOLO the first job would be finding external
+games with both a second camera and possession labels, so they can be checked the same way.
 
 ## 7. How to reproduce
 
 ```bash
 uv sync                          # exact versions from uv.lock
-# match files go in data/tactical/ and data/broadcast/ (see README)
+# match files go in data/tactical/ and data/broadcast/ (see README.md in the repo)
 uv run python src/predict.py     # writes evaluation/results/Leszek Pisz.csv, prints its sha256
 uv run python evaluation/validate_submission.py "evaluation/results/Leszek Pisz.csv"
 ```
 
 We ran it twice from the raw files and got the same file both times, sha256
-`a0f84e2d9714bd39c44a7a390df2e8af083b29cd3071a886eb700a490573817a`.
+`b75d370b25da73a650845ec984fdb0ea8337efe2aa9a32f43e604eab56383e5e`.
 
 You don't need any external data for this. The tuned numbers are in `configs/params.toml` and the
 shape model in `models/shape_model.json`. To redo the tuning (external data in
-`data/external/`, see README):
+`data/external/`, see README.md in the repo):
 
 ```bash
 uv run python src/external.py
