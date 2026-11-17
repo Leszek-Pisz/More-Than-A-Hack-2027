@@ -172,7 +172,7 @@ Results (spellF1; Metrica and IDSSE on fresh noise):
 | everything retuned | 0.496 | 0.396 | 0.511 |
 | plus gap filling, restart clue, pressing | 0.501 | 0.400 | 0.515 |
 | plus moving switches to the ball | 0.503 | 0.402 | 0.516 |
-| plus dropping blips under 1 s (submitted) | 0.506† | not run | 0.537 |
+| plus dropping blips under 1 s (submitted) | 0.508 | 0.399 | 0.537 |
 
 \* these two come from the league-to-league runs.
 
@@ -182,13 +182,9 @@ Together they're better on all three. Moving the switches was checked with windo
 and 2 s; we picked 1 s because it was best on Metrica + IDSSE, and the exam agreed. All of this
 was checked with `src/compare.py`.
 
-† The blip filter was checked without IDSSE (not downloaded on the machine that ran it), so the
-shape model there was the saved one, which saw Metrica in training: Metrica numbers in that run
-are a bit higher across the board and only comparable within the run. Same run, Metrica / exam:
-switches moved, no filter 0.502 / 0.516; plus filter 0.506 (2/3 games better) / 0.537 (20/20);
-filter without moving switches 0.507 / 0.537; neither 0.499 / 0.515. With the filter on, moving
-the switches barely matters (Metrica -0.001, exam +0.0002); we kept it because it was picked on
-IDSSE, which this run couldn't check.
+The blip filter is the one change we kept although it's a bit worse on one league: IDSSE goes
+from 0.402 to 0.399 (5 of 7 games worse), while Metrica (3/3) and the exam (20/20) clearly gain.
+Dropping only the short D's is no worse anywhere, but gains much less (0.505 / 0.402 / 0.517).
 
 Team shape made every single game better: 3/3 Metrica, 7/7 IDSSE, 20/20 SkillCorner. smooth50
 gets 0.2433 on the real match and 0.33 on our noisy Metrica, so our noise is probably nicer than
@@ -245,9 +241,8 @@ doesn't fall apart on either, but we don't know which definition is closer to th
 
 We predict fewer possessions than the truth on Metrica and IDSSE, and more on SkillCorner.
 
-The 1 s blip filter was checked on Metrica and SkillCorner, not on IDSSE (no time to download it).
-IDSSE's truth is built per frame from tracking, like the organisers' GT, and has more short
-possessions, so if the organisers' GT has many real possessions under 1 s the filter removes them.
+The 1 s blip filter costs a little on IDSSE. IDSSE's truth is built per frame from tracking,
+like the organisers' GT, and has more short possessions, so if the organisers' GT has many real possessions under 1 s the filter removes them.
 
 Our noise is probably too gentle (see smooth50 above).
 

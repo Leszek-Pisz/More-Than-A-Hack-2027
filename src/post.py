@@ -9,8 +9,8 @@ sides carry the same label gets that label (X - y - X -> X - X - X). Boundaries 
 different labels are never moved, so this can't make us later at a real change. Shortest
 segments go first, so merging one can't hide a shorter one next to it.
 
-Minimum lengths: [post] min_poss_s for H/A blips, min_dead_s for D blips. Picked on Metrica +
-IDSSE (compare.py), never on our match.
+Minimum lengths: [post] min_poss_s for H/A blips, min_dead_s for D blips. Checked on Metrica +
+IDSSE + the exam (compare.py), never on our match.
 """
 
 import numpy as np
