@@ -1,0 +1,218 @@
+# Leszek-Pisz: technical document
+
+More Than A Hack 2027, possession for BAR-ATH. The code is in this repo, the submission file is
+`evaluation/results/Leszek-Pisz.csv`.
+
+## 1. What we did
+
+Every frame gets H, A or D from a 3-state HMM (one state per label), decoded with Viterbi, each
+half on its own. For each frame we score how well H, A and D fit what we see in the tactical
+tracking. We use a handful of simple clues:
+
+- Tempo. Average player speed over about 4.4 s. When play stops, players walk.
+- Ball state. Is the ball tracked on the pitch, tracked out of play, or not tracked at all?
+  Before that we drop ball positions that would need more than 40 m/s to get to (glitches).
+- Nearest player. If someone is within about 1.6 m of the ball, that's a soft vote for their team.
+- Stoppages and control (`src/events.py`). The ball standing still, or standing still on a corner
+  / touchline / goal area / centre spot, the ball disappearing right at a line, and "control":
+  a player stays by the ball for 0.4 s or more with no opponent close.
+- Team shape (`src/shape_model.py`). A small logistic model that guesses who has the ball only
+  from how the two teams are standing: the team with the ball pushes up and spreads out, the
+  other one drops and gets compact. It doesn't look at the ball, so it's most useful when the
+  ball isn't tracked.
+
+The transitions are sticky: per frame it's very unlikely to leave a possession or a stoppage, so a
+single frame where an opponent happens to be closer doesn't flip the label. That's our whole
+"hysteresis", we don't smooth anything afterwards. All numbers are in `configs/params.toml`, and
+all of them were tuned on other matches.
+
+Why this and not something fancier:
+
+The metric really hates flicker. A possession is a maximal run of H or A and any D cuts it, so one
+wrong switch or a fake D breaks two possessions. Even a perfect prediction shifted by 1 s only
+gets about 0.65 spellF1. We wanted long, clean segments with sharp edges, which is what Viterbi on
+a sticky HMM gives you. Smoothing filters like the organisers' smooth50/125 move the edges.
+
+We also can't train anything on this match, no labels, no tuning on its GT, no self-supervision.
+With ~25 numbers that each mean something, a few external games are enough to tune honestly. A
+deep sequence model would need way more labelled tracking than we could get (legally) in time.
+
+And it's deterministic: no GPU, nothing random at prediction time, so the repo rebuilds the same
+file byte for byte.
+
+## 2. What we used and what we dropped
+
+From the match itself we only use the tactical tracking. The broadcast tracking gets converted
+but isn't used: lining up its clock with the tactical one (different offset per camera shot) was
+too much work for the time we had. Videos aren't used either. We planned to run a pretrained YOLO
+ball detector on them, but that's hours of GPU plus the same alignment problem, so we skipped it.
+Smart Tagging was tried and is switched off (more below).
+
+For tuning and training we used Metrica sample data and IDSSE (Bundesliga), and SkillCorner open
+data only as a final exam. We also looked at PFF FC World Cup 2022 but didn't get to it.
+
+Things we built, checked on the external games, and dropped:
+
+- Voting from Smart Tagging (an idea from our team): take the team in each tag as the team in
+  possession. The tag windows have fixed, made-up lengths (30-35 s), and the only way to tune
+  this would be on our match's GT, which isn't allowed. What's left is `src/tags_prior.py`, a
+  very weak nudge (attacking tag of a team pushes a bit towards that team, defending tag towards
+  the other one, weight 0.05 per frame picked up front). It's off in the submission because none
+  of the external games have Smart Tagging, so we had no way to check it.
+- A semi-Markov decoder (`src/decode.py`) with log-normal length priors for possessions and
+  stoppages fitted on Metrica, working on 0.2 s blocks and then refining the edges. After tuning
+  it lost to the plain HMM, 0.528 vs 0.546 on Metrica. Our guess is that possession lengths are
+  all over the place (0.8 to 25 s) so a length prior doesn't tell you much, and the blocks blur
+  the edges. It's still there as a switch (`[decoder] type`).
+- Using team shape only where the ball is missing. Clearly worse than using it on every frame.
+- In the Metrica labels, ending a stoppage only at a "SET PIECE" event. Metrica logs goal kicks
+  as normal passes, so we got fake 80 s stoppages. Now a stoppage ends at the next on-ball event.
+- Tuning on Metrica only. Fine on Metrica, but on IDSSE it ended up worse than our hand-picked
+  starting numbers (0.269 vs 0.333). So the final tuning uses both leagues, weighted equally.
+- Planned, never started (time): Kalman filter for the ball, broadcast fusion, YOLO, stitching
+  player tracks into 22 identities, a learned sequence model.
+
+## 3. Training and tuning data
+
+Nothing from BAR-ATH was used to train, tune or calibrate anything. Not the GT, not the video,
+not even stats about how good its tracking is. We ran the public 5 minutes twice just to see the
+pipeline works (0.40 with the hand-picked numbers, 0.378 after tuning) and didn't change anything
+because of it.
+
+Metrica sample data (github.com/metrica-sports/sample-data, free to use if you credit Metrica
+Sports). 3 anonymised games with tracking and events. The events come from Metrica, we turn
+them into H/A/D in code: possession is the team of the last on-ball event (pass, carry, set
+piece, recovery, shot, ball lost), challenges don't change it. The ball is dead from an out, a
+shot that goes out or in, a foul or an offside, until the next on-ball event. Used for tuning
+and the shape model.
+
+IDSSE (Bassek et al. 2025, Scientific Data, figshare 10.6084/m9.figshare.28196177, CC-BY 4.0).
+7 Bundesliga games. The DFL tracking (Sportec Solutions) has `BallPossession` and `BallStatus`
+on every frame, which is basically the same kind of truth the organisers built their GT from,
+so we just read it. Used for tuning and the shape model.
+
+SkillCorner open data (github.com/SkillCorner/opendata, MIT). 20 A-League games, broadcast
+tracking at 10 fps. Labels come from SkillCorner's automatic "phases of play": H/A inside a
+phase, D between phases. Used only as an exam, we never tuned on it. We keep only positions that
+were really detected, resample to 25 fps and add no noise, since the holes there are real.
+
+Metrica and IDSSE tracking is clean, so we mess it up ourselves (`external.add_noise`). The ball
+goes missing in 15-50% of frames, in long gaps (median 3-20 s), more often during stoppages and
+near the goals. There are 0.5-3 fake one-frame ball jumps per minute, smooth drift on positions
+(ball 0.05-0.5 m, players 0.05-0.4 m), player tracks missing 2-15% of the time in 1-10 s gaps,
+and 5-25% error on player speed. Each run draws these from the ranges above, which we fixed up
+front. None of it is fitted to our match.
+
+Tuning (`src/tune.py`) is a simple local random search, 150 tries, each one changing ~30% of the
+numbers from the best set so far. The score is mean spellF1 per league (Metrica, IDSSE), both
+leagues count the same, on noise seed 0. Then we check on fresh noise (seed 10) and on the
+SkillCorner exam. For team shape, each game is scored with a shape model trained on the other
+league, so the search can't trust it more than it would on a new match.
+
+The shape model is a logistic regression without an intercept, so swapping the teams flips the
+answer exactly and it can't learn "home has the ball more". Per team, in its own attacking
+direction: centroid, most advanced player, back line, length, width, speed towards goal. It
+gets home minus away, smoothed over 2 s. Attacking direction per half comes from the keeper
+(the player whose average x is closest to an end line), no ball or labels needed. The final
+model is trained on all 10 Metrica + IDSSE games with noise (`models/shape_model.json`).
+
+Results (spellF1; Metrica and IDSSE on fresh noise):
+
+| Version | Metrica | IDSSE | SkillCorner exam |
+|---|---|---|---|
+| organisers' smooth50 | 0.330 | | |
+| hand-picked numbers | 0.420* | 0.333* | 0.387 |
+| tuned on both leagues | 0.447 | 0.336 | 0.453 |
+| plus team shape | 0.487 | 0.378 | 0.485 |
+| everything retuned (submitted) | 0.496 | 0.396 | 0.511 |
+
+\* these two come from the league-to-league runs.
+
+Team shape made every single game better: 3/3 Metrica, 7/7 IDSSE, 20/20 SkillCorner. smooth50
+gets 0.2433 on the real match and 0.33 on our noisy Metrica, so our noise is probably nicer than
+real life.
+
+## 4. Possession rules
+
+The organisers' GT is mechanical: D where the tracking says the ball is dead, otherwise the team
+the tracking says owns the ball, no smoothing. We try to follow the same logic.
+
+Loose or contested ball: it stays with the last team. A missing ball, or a ball with nobody near
+it, doesn't vote for H or A, so the sticky transitions keep whoever had it. Possession changes
+only when someone gets control: a player near the ball, and even more so a player who stays with
+it for 0.4 s with no opponent close. Just running past the ball doesn't count.
+
+Duels: when players from both teams are near the ball, the nearest-player vote is weak (tuned to
+about 0.69) and the control clue doesn't fire because an opponent is close. So the last team keeps
+it until someone clearly comes out with the ball.
+
+Restarts: D starts when the ball goes out (0.5 m past a line, or disappearing right at a line) or
+when play stops and players slow down to walking. D ends when play picks up again and the ball
+leaves its spot. The team taking the restart gets possession from then on, through the
+nearest-player and control clues. Throw-ins, corners, goal kicks and free kicks all work like
+this, and a ball standing still on a set-piece spot counts as extra evidence for D.
+
+Frames outside the two halves are D (they aren't graded anyway).
+
+## 5. Missing and noisy tracking
+
+Ball positions that would need more than 40 m/s are thrown out, the hardest shots are around 35.
+
+When the ball is missing, that frame gives no "who's near" vote and only a weak hint about alive
+vs dead (tuned: the ball is missing in 50% of alive frames and 42% of dead ones). The HMM just
+carries the last state through the gap. Team shape doesn't need the ball, so long gaps still get
+some H vs A signal from it.
+
+Tempo is the mean over whoever is tracked, over 4.4 s, so missing or doubled player tracks barely
+move it. Frames with nobody tracked take the value from their neighbours.
+
+Everything was tuned with heavy random noise on top of the external games and checked on real
+broadcast holes (SkillCorner), never on clean data.
+
+## 6. Limitations
+
+The datasets don't agree on what a possession is. IDSSE has ~440 short possessions per game
+(per frame, from tracking), Metrica ~370 (from events). Tuning mostly learns "how many
+possessions", and tuning on one league made the other one worse. We took the version that
+doesn't fall apart on either, but we don't know which definition is closer to the organisers'.
+
+We predict fewer possessions than the truth on Metrica and IDSSE, and more on SkillCorner.
+
+Our noise is probably too gentle (see smooth50 above).
+
+The tuning ended up with the ball missing in about half of alive frames. If our match loses the
+ball in play a lot more than that, D detection will suffer.
+
+We only use the tactical tracking, broadcast and video are ignored. And the edges come straight
+from the HMM, without detecting actual touches, so they can be a few frames off.
+
+With more time we'd fill ball gaps with the broadcast tracking and a pretrained YOLO (no
+fine-tuning on our video), clean the ball with a Kalman filter that knows about kicks, stitch
+players into 22 identities to follow passes, and add more labelled games (PFF World Cup 2022) to
+train a proper sequence model.
+
+## 7. How to reproduce
+
+```bash
+uv sync                          # exact versions from uv.lock
+# match files go in data/tactical/ and data/broadcast/ (see README)
+uv run python src/predict.py     # writes evaluation/results/Leszek-Pisz.csv, prints its sha256
+uv run python evaluation/validate_submission.py evaluation/results/Leszek-Pisz.csv
+```
+
+We ran it twice from the raw files and got the same file both times, sha256
+`2c7a384b3bb7aa7549534612022fbc926e116821632f3ecaac264f4a5282b1e3`.
+
+You don't need any external data for this. The tuned numbers are in `configs/params.toml` and the
+shape model in `models/shape_model.json`. To redo the tuning (external data in
+`data/external/`, see README):
+
+```bash
+uv run python src/external.py
+uv run python src/shape_model.py --eval
+uv run python src/shape_model.py --train
+uv run python src/tune.py --trials 150
+uv run python src/tune.py --exam
+```
+
+Seeds are fixed everywhere (noise 0 / 10 / 20, search 2027).
