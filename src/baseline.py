@@ -20,6 +20,7 @@ import pandas as pd
 import ball
 import decode
 import events
+import post
 import shape_model
 import tags_prior
 
@@ -232,13 +233,15 @@ def label_match(table, tracks, p, n_frames, pitch=(PITCH_LENGTH, PITCH_WIDTH), e
         if extra is not None:
             ll = ll + extra[part["frame"].to_numpy()]
         if p.get("decoder", {}).get("type") == "hsmm":
-            codes[part["frame"].to_numpy()] = decode.hsmm(ll, p)
+            half_codes = decode.hsmm(ll, p)
         else:
-            path = viterbi(ll, log_trans)
-            if p["decoder"].get("refine_edges"):
-                dh, da, kicked = nearest_dists(part, slots_h, slots_a, p)
-                path = snap_edges(path, dh, da, p, kicked)
-            codes[part["frame"].to_numpy()] = path
+            half_codes = viterbi(ll, log_trans)
+        # first drop fake blips (post.py), then move the real H<->A switches to the ball
+        half_codes = post.merge_short(half_codes, p)
+        if p.get("decoder", {}).get("type") != "hsmm" and p["decoder"].get("refine_edges"):
+            dh, da, kicked = nearest_dists(part, slots_h, slots_a, p)
+            half_codes = snap_edges(half_codes, dh, da, p, kicked)
+        codes[part["frame"].to_numpy()] = half_codes
     return codes
 
 

@@ -27,14 +27,22 @@ tracking. We use a handful of simple clues:
   most useful when the ball isn't tracked.
 
 The transitions are sticky: per frame it's very unlikely to leave a possession or a stoppage, so a
-single frame where an opponent happens to be closer doesn't flip the label. That's our whole
-"hysteresis", we don't smooth anything afterwards.
+single frame where an opponent happens to be closer doesn't flip the label. That's our
+"hysteresis".
 
-The one thing we do after decoding: a sticky HMM tends to switch H to A a little late, once
-enough evidence has piled up. So each H/A switch is moved, at most 1 s either way, to the start
-of the closest stretch where a player of the new team is at the ball (within 1.6 m) and closer
-than anyone from the other team. Switches into or out of D aren't touched. All numbers are in `configs/params.toml`, and
-all of them were tuned on other matches.
+Two clean-ups after decoding, in this order:
+
+1. Drop fake blips (`src/post.py`): a stretch shorter than 1 s with the same label on both sides
+   takes that label (H-A-H becomes H, H-D-H becomes H). It never moves a boundary between two
+   different labels, so it can't make a real change late, it only removes fake switches, each of
+   which would cost two possessions. The 1 s comes from football (control needs a couple of
+   touches, a dribble or a pass; a real stoppage lasts seconds), fixed before the exam.
+2. Move switches to the ball: a sticky HMM tends to switch H to A a little late, once enough
+   evidence has piled up. So each H/A switch is moved, at most 1 s either way, to the start of
+   the closest stretch where a player of the new team is at the ball (within 1.6 m) and closer
+   than anyone from the other team. Switches into or out of D aren't touched.
+
+All numbers are in `configs/params.toml`, and all of them were tuned on other matches.
 
 Why this and not something fancier:
 
@@ -163,7 +171,8 @@ Results (spellF1; Metrica and IDSSE on fresh noise):
 | plus team shape | 0.487 | 0.378 | 0.485 |
 | everything retuned | 0.496 | 0.396 | 0.511 |
 | plus gap filling, restart clue, pressing | 0.501 | 0.400 | 0.515 |
-| plus moving switches to the ball (submitted) | 0.503 | 0.402 | 0.516 |
+| plus moving switches to the ball | 0.503 | 0.402 | 0.516 |
+| plus dropping blips under 1 s (submitted) | 0.506† | not run | 0.537 |
 
 \* these two come from the league-to-league runs.
 
@@ -172,6 +181,14 @@ clue, which lost a hair on Metrica (0.4965 to 0.4960) but gained on the exam (0.
 Together they're better on all three. Moving the switches was checked with windows of 0.5, 1
 and 2 s; we picked 1 s because it was best on Metrica + IDSSE, and the exam agreed. All of this
 was checked with `src/compare.py`.
+
+† The blip filter was checked without IDSSE (not downloaded on the machine that ran it), so the
+shape model there was the saved one, which saw Metrica in training: Metrica numbers in that run
+are a bit higher across the board and only comparable within the run. Same run, Metrica / exam:
+switches moved, no filter 0.502 / 0.516; plus filter 0.506 (2/3 games better) / 0.537 (20/20);
+filter without moving switches 0.507 / 0.537; neither 0.499 / 0.515. With the filter on, moving
+the switches barely matters (Metrica -0.001, exam +0.0002); we kept it because it was picked on
+IDSSE, which this run couldn't check.
 
 Team shape made every single game better: 3/3 Metrica, 7/7 IDSSE, 20/20 SkillCorner. smooth50
 gets 0.2433 on the real match and 0.33 on our noisy Metrica, so our noise is probably nicer than
@@ -227,6 +244,10 @@ possessions", and tuning on one league made the other one worse. We took the ver
 doesn't fall apart on either, but we don't know which definition is closer to the organisers'.
 
 We predict fewer possessions than the truth on Metrica and IDSSE, and more on SkillCorner.
+
+The 1 s blip filter was checked on Metrica and SkillCorner, not on IDSSE (no time to download it).
+IDSSE's truth is built per frame from tracking, like the organisers' GT, and has more short
+possessions, so if the organisers' GT has many real possessions under 1 s the filter removes them.
 
 Our noise is probably too gentle (see smooth50 above).
 

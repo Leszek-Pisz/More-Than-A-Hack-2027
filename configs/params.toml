@@ -89,6 +89,18 @@ poss_sigma = 1.442
 dead_mu = 2.657
 dead_sigma = 1.175
 
+[post]
+# post.py: after decoding, a blip shorter than this with the SAME label on both sides takes that
+# label (H-A-H -> H, H-D-H -> H). Never moves a boundary between two different labels.
+# Starting guesses: a real possession needs control (>= 2 touches / a dribble / a pass), which
+# hardly fits in under ~1 s; a real stoppage (ball out, foul) lasts seconds. 1 s / 1 s fixed
+# before the exam. compare.py 17.11 (no IDSSE downloaded, saved shape model): Metrica
+# 0.4991 -> 0.5073 (3/3 games), SkillCorner exam 0.5153 -> 0.5365 (20/20). 1.5 s for possessions
+# scored higher on the exam (0.5482), not taken: that would be picking on the exam.
+enabled = true
+min_poss_s = 1.0
+min_dead_s = 1.0
+
 [tags]
 # Smart Tagging hint (tags_prior.py). Can't be tuned (no tags in the external games), so it's a
 # fixed small guess and off until we decide otherwise.

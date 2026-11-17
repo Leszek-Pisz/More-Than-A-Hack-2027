@@ -71,6 +71,11 @@ SPACE_RESTART = [
     ("events", "restart_s", 0.5, 6.0, False),
     ("events", "p_restart_team", 0.55, 0.95, False),
 ]
+# only used when [post] enabled = true
+SPACE_POST = [
+    ("post", "min_poss_s", 0.0, 3.0, False),
+    ("post", "min_dead_s", 0.0, 3.0, False),
+]
 # only used when [decoder] type = "hsmm"
 SPACE_HSMM = [
     ("decoder", "evidence_scale", 0.1, 1.5, True),
@@ -152,7 +157,8 @@ def space_of(p):
     return (SPACE + (SPACE_HSMM if p.get("decoder", {}).get("type") == "hsmm" else [])
             + (SPACE_SHAPE if p.get("shape", {}).get("enabled") else [])
             + (SPACE_FILL if p["ball"].get("fill_gaps") else [])
-            + (SPACE_RESTART if p["events"].get("use_restart") else []))
+            + (SPACE_RESTART if p["events"].get("use_restart") else [])
+            + (SPACE_POST if p.get("post", {}).get("enabled") else []))
 
 
 def sample(best, rng, share=0.3):
