@@ -11,6 +11,9 @@ Per frame and per team, in the team's own attacking direction (distance from its
   length     front - back_line
   width      spread across the pitch (sd of y)
   push       mean speed towards the opponent's goal
+  press      mean distance from each player to the nearest opponent (free vs marked)
+  in_opp     how many players are in the opponent's half
+Which of these the model uses is FEATURES (saved in the model file too).
 The model sees home minus away for each, smoothed over WINDOW_S. A logistic regression with no
 intercept: swapping the teams flips the answer exactly, so it can't learn "home has the ball more".
 
@@ -37,7 +40,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "models" / "shape_model.json"
 FPS = 25
 H, A, D = 0, 1, 2
-FEATURES = ("centroid", "front", "back_line", "length", "width", "push")
+ALL_FEATURES = ("centroid", "front", "back_line", "length", "width", "push", "press", "in_opp")
+FEATURES = ("centroid", "front", "back_line", "length", "width", "push", "press")   # in_opp: hurt the exam
 
 # fixed up front, not tuned:
 WINDOW_S = 2.0       # a team needs a couple of seconds to change shape, so smooth over that
@@ -120,13 +124,34 @@ def team_features(px, py, defends_left, length):
     return feats
 
 
+def _press(px, py, ox, oy):
+    # mean over a team's players of the distance to the closest opponent
+    near = np.full(px.shape, np.inf)
+    for j in range(ox.shape[1]):
+        d = np.hypot(px - ox[:, [j]], py - oy[:, [j]])
+        near = np.fmin(near, d)
+    near[np.isinf(near)] = np.nan
+    return _quiet(np.nanmean, near, axis=1)
+
+
+def _extra(px, py, ox, oy, defends_left, length):
+    u = px if defends_left else length - px
+    n_vis = (~np.isnan(u)).sum(axis=1)
+    feats = np.column_stack([_press(px, py, ox, oy), np.sum(u > length / 2, axis=1)]).astype(float)
+    feats[n_vis < MIN_PLAYERS] = np.nan
+    return feats
+
+
 def half_features(part, slots_h, slots_a, pitch):
-    """(n, len(FEATURES)) home-minus-away shape, smoothed, for one half's rows."""
+    """(n, len(ALL_FEATURES)) home-minus-away shape, smoothed, for one half's rows."""
     length = pitch[0]
     px_h, py_h = _xy(part, slots_h)
     px_a, py_a = _xy(part, slots_a)
     left = home_defends_left(px_h, px_a, length)
-    diff = team_features(px_h, py_h, left, length) - team_features(px_a, py_a, not left, length)
+    diff = np.column_stack([
+        team_features(px_h, py_h, left, length) - team_features(px_a, py_a, not left, length),
+        _extra(px_h, py_h, px_a, py_a, left, length) - _extra(px_a, py_a, px_h, py_h, not left, length),
+    ])
     window = max(1, int(WINDOW_S * FPS))
     return pd.DataFrame(diff).rolling(window, center=True, min_periods=1).mean().to_numpy()
 
@@ -139,7 +164,7 @@ def _team_slots(tracks):
 def match_features(table, tracks, pitch, n_frames):
     """(n_frames, F) for a whole match, NaN outside the halves."""
     slots_h, slots_a = _team_slots(tracks)
-    out = np.full((n_frames, len(FEATURES)), np.nan)
+    out = np.full((n_frames, len(ALL_FEATURES)), np.nan)
     for half in (1, 2):
         rows = table.index[table["half"].eq(half).fillna(False).to_numpy(bool)]
         if len(rows) == 0:
@@ -152,12 +177,15 @@ def match_features(table, tracks, pitch, n_frames):
 # ---------------------------------------------------------------- model
 
 def logit(features, model):
+    # features: all of ALL_FEATURES, the model picks the ones it was trained on
+    features = features[:, [ALL_FEATURES.index(f) for f in model["features"]]]
     z = np.nan_to_num(features / np.asarray(model["scale"]), nan=0.0)   # missing -> "no info"
     return z @ np.asarray(model["weights"])
 
 
-def fit(X, y, sample_weight):
+def fit(X, y, sample_weight, features=FEATURES):
     """Logistic regression, no intercept, Newton steps with a light ridge penalty."""
+    X = X[:, [ALL_FEATURES.index(f) for f in features]]
     sw = sample_weight * len(y) / sample_weight.sum()
     scale = np.sqrt(np.nansum(sw[:, None] * X ** 2, axis=0) / sw.sum())
     scale[scale == 0] = 1.0
@@ -171,7 +199,7 @@ def fit(X, y, sample_weight):
         w += step
         if np.abs(step).max() < 1e-9:
             break
-    return {"features": list(FEATURES), "scale": scale.tolist(), "weights": w.tolist(),
+    return {"features": list(features), "scale": scale.tolist(), "weights": w.tolist(),
             "window_s": WINDOW_S}
 
 
@@ -235,9 +263,15 @@ def training_rows(games, seeds=TRAIN_NOISE_SEEDS):
     return np.vstack(Xs), np.concatenate(ys), np.concatenate(ws)
 
 
-def train(games):
-    X, y, w = training_rows(games)
-    return fit(X, y, w)
+_ROWS = {}
+
+
+def train(games, features=FEATURES):
+    # rows cached, so trying several feature sets doesn't redo the noise + features
+    key = tuple(games)
+    if key not in _ROWS:
+        _ROWS[key] = training_rows(games)
+    return fit(*_ROWS[key], features=features)
 
 
 CONFIGS = [None] + [{"enabled": True, "mode": m, "weight": w, "clip": 4.0}

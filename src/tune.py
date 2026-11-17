@@ -59,6 +59,18 @@ SPACE = [
 SPACE_SHAPE = [
     ("shape", "weight", 0.02, 0.5, True),
 ]
+# only used when [ball] fill_gaps = true
+SPACE_FILL = [
+    ("ball", "fill_max_s", 0.2, 2.0, False),
+    ("ball", "fill_speed", 10.0, 40.0, False),
+]
+# only used when [events] use_restart = true
+SPACE_RESTART = [
+    ("events", "restart_radius", 1.0, 4.0, False),
+    ("events", "restart_opp_min", 1.5, 9.0, False),
+    ("events", "restart_s", 0.5, 6.0, False),
+    ("events", "p_restart_team", 0.55, 0.95, False),
+]
 # only used when [decoder] type = "hsmm"
 SPACE_HSMM = [
     ("decoder", "evidence_scale", 0.1, 1.5, True),
@@ -133,7 +145,9 @@ def objective(p, sets):
 
 def space_of(p):
     return (SPACE + (SPACE_HSMM if p.get("decoder", {}).get("type") == "hsmm" else [])
-            + (SPACE_SHAPE if p.get("shape", {}).get("enabled") else []))
+            + (SPACE_SHAPE if p.get("shape", {}).get("enabled") else [])
+            + (SPACE_FILL if p["ball"].get("fill_gaps") else [])
+            + (SPACE_RESTART if p["events"].get("use_restart") else []))
 
 
 def sample(best, rng, share=0.3):

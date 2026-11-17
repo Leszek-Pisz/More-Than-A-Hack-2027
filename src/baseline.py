@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import ball
 import decode
 import events
 import shape_model
@@ -81,6 +82,8 @@ def evidence(table, slots_h, slots_a, p, pitch=(PITCH_LENGTH, PITCH_WIDTH)):
     e = p["evidence"]
     bx, by = clean_ball(table["ball_x"].to_numpy(np.float64), table["ball_y"].to_numpy(np.float64),
                         p["ball"]["max_speed"])
+    if p["ball"].get("fill_gaps"):
+        bx, by = ball.fill_short_gaps(bx, by, p["ball"]["fill_max_s"], p["ball"]["fill_speed"])
     missing = np.isnan(bx)
     m = p["ball"]["out_margin"]
     out = ~missing & ((bx < -m) | (bx > pitch[0] + m) | (by < -m) | (by > pitch[1] + m))

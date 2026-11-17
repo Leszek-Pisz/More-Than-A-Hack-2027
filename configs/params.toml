@@ -9,6 +9,9 @@ name = "Leszek-Pisz"          # team name, file goes to evaluation/results/<name
 [ball]
 max_speed = 40.0              # m/s, even the hardest shots are ~35, so faster = tracking glitch
 out_margin = 0.5              # m past the line before we call it out
+fill_gaps = true              # ball.py: patch short holes with a straight line
+fill_max_s = 1.0              # only holes up to this long, longer ones stay empty
+fill_speed = 30.0             # m/s, skip the patch if the ball would need to go faster
 
 [tempo]
 window_s = 4.365
@@ -53,6 +56,11 @@ use_control = true            # a player stays by the ball, no opponent near
 control_radius = 1.288          # m
 control_s = 0.407
 p_control_is_owner = 0.569
+use_restart = true            # whoever stood by the still ball takes the restart
+restart_radius = 2.0          # m, taker this close to the ball...
+restart_opp_min = 3.0         # m, ...and no opponent closer than this (2 m at throw-ins, 9.15 at free kicks)
+restart_s = 3.0               # nudge lasts this long after the ball moves
+p_restart_team = 0.7
 
 [decoder]
 # module 7. "hmm" = plain Viterbi from baseline.py, "hsmm" = decode.py with length priors
